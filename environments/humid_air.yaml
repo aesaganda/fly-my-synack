@@ -1,0 +1,25 @@
+name: humid_air
+description: >
+  Warm, near-saturated air at 25C / ~90% RH. Physically this is barely
+  distinguishable from dry air - humid air is very slightly LESS dense than dry
+  air, because water vapour is lighter than N2/O2. The interesting effect here
+  is sensory, not mechanical, and the preset says so rather than inventing drag.
+units: mm_g_s
+
+physics:
+  density: 1.177e-6      # moist air @25C, ~90% RH - marginally below dry air
+  viscosity: 1.83e-5
+  wind: [0.0, 0.0, 0.0]
+  gravity: [0.0, 0.0, -9810.0]
+  integrator: Euler
+
+neural:
+  temperature_c: 25.0
+  q10: 2.3               # PLACEHOLDER
+  tau_clamp_ms: [2.0, 40.0]
+
+sensory:
+  # PLACEHOLDER. Rationale, not measurement: humidity loads the antennal
+  # hygro/thermosensory sacculus and damps arista motion slightly.
+  mechanosensory_gain: 1.05
+  johnstons_organ_gain: 0.85

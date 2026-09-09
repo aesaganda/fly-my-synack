@@ -1,0 +1,19 @@
+name: dry_land
+description: Still, dry air at 25C. The baseline every other preset is compared against.
+units: mm_g_s
+
+physics:
+  density: 1.184e-6      # dry air @25C, 101.325 kPa
+  viscosity: 1.84e-5     # dry air @25C (Sutherland)
+  wind: [0.0, 0.0, 0.0]
+  gravity: [0.0, 0.0, -9810.0]
+  integrator: Euler      # FlyGym default; fine when viscosity is negligible
+
+neural:
+  temperature_c: 25.0
+  q10: 2.3               # PLACEHOLDER, not a sourced Drosophila constant.
+  tau_clamp_ms: [2.0, 40.0]   # PLACEHOLDER guard rails.
+
+sensory:
+  mechanosensory_gain: 1.0     # reference condition, by definition
+  johnstons_organ_gain: 1.0

@@ -1,0 +1,25 @@
+name: windy
+description: >
+  Dry air at 25C with a steady 0.5 m/s lateral breeze. NOTE: MuJoCo's `wind` is
+  subtracted from body velocity and the resulting force scales with density and
+  viscosity - so wind with zero density would be a silent no-op. Density is
+  nonzero here on purpose.
+units: mm_g_s
+
+physics:
+  density: 1.184e-6
+  viscosity: 1.84e-5
+  wind: [500.0, 0.0, 0.0]   # 0.5 m/s along +x, in mm/s
+  gravity: [0.0, 0.0, -9810.0]
+  integrator: Euler
+
+neural:
+  temperature_c: 25.0
+  q10: 2.3               # PLACEHOLDER
+  tau_clamp_ms: [2.0, 40.0]
+
+sensory:
+  # PLACEHOLDER. Johnston's organ is the fly's wind/air-motion detector, so it
+  # is the input most plausibly boosted here.
+  mechanosensory_gain: 1.1
+  johnstons_organ_gain: 1.5

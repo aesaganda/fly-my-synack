@@ -1,0 +1,20 @@
+# Pinned. flygym 2.1.0 caps mujoco at <3.10 while PyPI's latest is 3.12 - that
+# cap is the most likely install failure if anything here is loosened.
+flygym==2.1.0
+mujoco==3.9.0
+numpy==2.3.4
+scipy==1.15.3
+pandas==2.3.3
+pyarrow==21.0.0
+pyyaml==6.0.2
+requests==2.32.4
+# torch is installed separately from TORCH_INDEX (see Dockerfile): the default
+# linux/x86_64 wheel bundles ~3 GB of CUDA libraries even for CPU-only use.
+# Used for interactive connectome exploration. The fetch path in
+# brain/sources/neuprint.py deliberately uses plain HTTP instead, because
+# neuprint.Client hard-requires a token and the default path must work without
+# credentials.
+neuprint-python==0.6.3
+fastapi==0.118.0
+uvicorn[standard]==0.37.0
+pytest==8.4.2

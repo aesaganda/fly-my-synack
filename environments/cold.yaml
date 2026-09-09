@@ -1,0 +1,19 @@
+name: cold
+description: Dry air at 15C. Slower neural kinetics via Q10; slightly denser air.
+units: mm_g_s
+
+physics:
+  density: 1.225e-6      # dry air @15C
+  viscosity: 1.79e-5
+  wind: [0.0, 0.0, 0.0]
+  gravity: [0.0, 0.0, -9810.0]
+  integrator: Euler
+
+neural:
+  temperature_c: 15.0
+  q10: 2.3               # PLACEHOLDER
+  tau_clamp_ms: [2.0, 40.0]
+
+sensory:
+  mechanosensory_gain: 1.0
+  johnstons_organ_gain: 1.0

@@ -1,0 +1,86 @@
+# docker compose up sim        # one run, then exits
+# docker compose up web        # browser UI on http://localhost:8080
+#
+# On a network where apt and public PyPI are blocked, build with the offline
+# Dockerfile instead - set DOCKERFILE=Dockerfile.offline and PIP_INDEX_URL in a
+# .env file next to this one. See README "Building behind a proxy".
+
+x-build: &build
+  context: .
+  dockerfile: ${DOCKERFILE:-Dockerfile}
+  args:
+    BASE_IMAGE: ${BASE_IMAGE:-python:3.12-trixie}
+    TORCH_INDEX: ${TORCH_INDEX:-}
+    PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+    CONNECTOME_SUBSET: ${NEURON_SUBSET:-motor}
+
+x-volumes: &volumes
+  # Connectome tables are GB-scale; never baked into the image.
+  - connectome:/data/connectome
+  - checkpoints:/data/checkpoints
+  - runs:/data/runs
+
+services:
+  sim:
+    build: *build
+    image: flysim:${TAG:-cpu}
+    volumes: *volumes
+    environment:
+      # neuPrint works without a token; supplying one raises the rate limits.
+      NEUPRINT_TOKEN: ${NEUPRINT_TOKEN:-}
+      FLY_ENV_DIR: /app/environments
+      MUJOCO_GL: egl
+    command: >
+      python3 run.py
+      --env ${FLY_ENV:-dry_land}
+      --steps ${STEPS:-50000}
+      --connectome ${CONNECTOME:-neuprint}
+      --neuron-subset ${NEURON_SUBSET:-motor}
+      --render ${RENDER:-off}
+    # GPU: `gpus: all` is the current Compose short form. Uncomment to use it.
+    # Requires an NVIDIA GPU + host driver >= 525.60.13 for CUDA 12.x, and an
+    # image built with the CUDA base (see Dockerfile). NOT VERIFIED - the dev
+    # host had no NVIDIA GPU.
+    #
+    # gpus: all
+    #
+    # Long form, if you need to pin specific devices:
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           device_ids: ["${GPU_DEVICE:-0}"]
+    #           capabilities: [gpu]
+
+  web:
+    build: *build
+    image: flysim:${TAG:-cpu}
+    ports:
+      - "${WEB_PORT:-8080}:8000"
+    volumes:
+      # Read-only connectome: this service must never write to it. And it is
+      # deliberately NOT given NEUPRINT_TOKEN - read-only sim control only.
+      - connectome:/data/connectome:ro
+      - checkpoints:/data/checkpoints
+      - runs:/data/runs
+    environment:
+      FLY_ENV: ${FLY_ENV:-dry_land}
+      FLY_CONNECTOME: ${CONNECTOME:-synthetic}
+      FLY_SUBSET: ${NEURON_SUBSET:-motor}
+      FLY_CONNECTOME_DIR: /data/connectome
+      FLY_ENV_DIR: /app/environments
+      MUJOCO_GL: egl
+    command: python3 -m uvicorn web.app:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD", "python3", "-c",
+             "import urllib.request;urllib.request.urlopen('http://127.0.0.1:8000/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  connectome:
+  checkpoints:
+  runs:

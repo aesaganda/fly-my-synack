@@ -1,0 +1,12 @@
+.git
+.gitignore
+data/
+runs/
+checkpoints/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+*.mp4
+*.feather
+*.parquet

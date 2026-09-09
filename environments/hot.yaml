@@ -1,0 +1,19 @@
+name: hot
+description: Dry air at 35C. Faster neural kinetics via Q10; slightly thinner air.
+units: mm_g_s
+
+physics:
+  density: 1.146e-6      # dry air @35C
+  viscosity: 1.89e-5     # air viscosity RISES with temperature
+  wind: [0.0, 0.0, 0.0]
+  gravity: [0.0, 0.0, -9810.0]
+  integrator: Euler
+
+neural:
+  temperature_c: 35.0    # Drosophila are ectotherms: neural kinetics track ambient T
+  q10: 2.3               # PLACEHOLDER
+  tau_clamp_ms: [2.0, 40.0]
+
+sensory:
+  mechanosensory_gain: 1.0
+  johnstons_organ_gain: 1.0

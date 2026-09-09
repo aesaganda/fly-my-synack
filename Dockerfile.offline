@@ -1,0 +1,73 @@
+# syntax=docker/dockerfile:1
+#
+# For networks where apt and public PyPI are blocked but Docker Hub and an
+# internal package mirror are reachable - which is the case on the network this
+# was developed on.
+#
+# Differences from the main Dockerfile:
+#   * bases on FlyGym's official image, which already contains libEGL, ffmpeg,
+#     flygym 2.1.0 and mujoco 3.9 - so no apt is needed at all
+#   * installs only the handful of extra packages, from PIP_INDEX_URL
+#
+#   docker build -f Dockerfile.offline -t flysim:cpu \
+#     --build-arg PIP_INDEX_URL=https://your-mirror/artifactory/api/pypi/pypi/simple .
+#
+# Note the base image is linux/amd64 only.
+
+FROM nelyepfl/flygym:v2.1.0 AS runtime
+ARG PIP_INDEX_URL=""
+# CPU-only torch by default. The plain PyPI wheel pulls ~3 GB of CUDA libraries
+# even when you never touch a GPU. For CUDA, pass e.g.
+#   --build-arg TORCH_INDEX=https://download.pytorch.org/whl/cu126
+ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+ARG TORCH_VERSION=2.14.0
+SHELL ["/bin/bash", "-c"]
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    MUJOCO_GL=egl \
+    PYOPENGL_PLATFORM=egl \
+    FLY_ENV_DIR=/app/environments \
+    VENV=/opt/flygym/.venv
+
+# Move the base image's venv out of /root so a non-root user can reach it
+# (/root is mode 700, so the venv is unusable from another account in place).
+RUN mv /root/flygym /opt/flygym
+
+ENV PATH=/opt/flygym/.venv/bin:$PATH
+
+# Everything flygym's image does not already ship. torch comes from its own
+# index because download.pytorch.org is commonly allowed where PyPI is not.
+COPY requirements-extra.txt /tmp/requirements-extra.txt
+# torch comes from TORCH_INDEX (for the +cpu build), but its dependencies do
+# not live there - they must still resolve through PIP_INDEX_URL, hence the
+# --extra-index-url. Without it pip falls back to files.pythonhosted.org, which
+# is exactly the host that is blocked on a restricted network.
+RUN if [ -n "$PIP_INDEX_URL" ]; then pip config set global.index-url "$PIP_INDEX_URL"; fi \
+    && pip install --no-cache-dir \
+        --index-url "$TORCH_INDEX" \
+        ${PIP_INDEX_URL:+--extra-index-url "$PIP_INDEX_URL"} \
+        "torch==${TORCH_VERSION}" \
+    && pip install --no-cache-dir -r /tmp/requirements-extra.txt
+
+RUN useradd --create-home --uid 1000 fly \
+    && mkdir -p /data/connectome /data/checkpoints /data/runs \
+    && chown -R fly:fly /data /opt/flygym
+
+# Separate stage, copying ONLY brain/, so an edit to run.py or the web UI does
+# not invalidate this layer and re-download the connectome tables.
+FROM runtime AS data-fetch
+ARG CONNECTOME_SUBSET=motor
+WORKDIR /app
+COPY brain/ /app/brain/
+RUN mkdir -p /data/connectome \
+    && python3 -m brain.fetch --subset "${CONNECTOME_SUBSET}" --out /data/connectome \
+       || echo "connectome prefetch skipped; run.py will fetch on demand"
+
+FROM runtime AS final
+WORKDIR /app
+COPY --chown=fly:fly . /app
+COPY --from=data-fetch --chown=fly:fly /data/connectome /data/connectome
+
+USER fly
+CMD ["python3", "run.py", "--list-envs"]

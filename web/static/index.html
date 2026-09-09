@@ -1,0 +1,185 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Connectome fly &mdash; live</title>
+<style>
+  :root { --bg:#12141a; --fg:#e6e8ee; --dim:#8b93a7; --line:#272b36; --accent:#6fd08c; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+  header { padding:12px 18px; border-bottom:1px solid var(--line); display:flex;
+           align-items:baseline; gap:14px; flex-wrap:wrap; }
+  h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.02em; }
+  .note { color:var(--dim); font-size:12px; }
+  main { display:grid; grid-template-columns: minmax(320px,1fr) 300px; gap:18px; padding:18px; }
+  @media (max-width:760px) { main { grid-template-columns:1fr; } }
+  #view { width:100%; background:#000; border:1px solid var(--line); border-radius:6px;
+          aspect-ratio:4/3; object-fit:contain; }
+  section { border:1px solid var(--line); border-radius:6px; padding:12px; }
+  h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim);
+       margin:0 0 10px; font-weight:600; }
+  button { font:inherit; background:#1c2029; color:var(--fg); border:1px solid var(--line);
+           border-radius:4px; padding:6px 10px; cursor:pointer; }
+  button:hover { border-color:var(--accent); }
+  button[aria-pressed="true"] { background:var(--accent); color:#0d1013; border-color:var(--accent); }
+  .row { display:flex; flex-wrap:wrap; gap:6px; }
+  dl { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; margin:0; }
+  dt { color:var(--dim); } dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; }
+  input[type=range] { width:100%; }
+  .warn { color:#d8a657; font-size:12px; margin-top:10px; }
+  #status { color:var(--dim); font-size:12px; }
+</style>
+
+<header>
+  <h1>Connectome-driven fly</h1>
+  <span class="note">CPG gait steered by decoded DN/MN population rates &mdash; not emergent locomotion</span>
+  <span id="status">connecting&hellip;</span>
+</header>
+
+<main>
+  <div><img id="view" alt="simulation view"></div>
+
+  <div style="display:flex; flex-direction:column; gap:14px;">
+    <section>
+      <h2>Environment</h2>
+      <div class="row" id="presets"></div>
+    </section>
+
+    <section>
+      <h2>Run</h2>
+      <div class="row">
+        <button id="pause">Pause</button>
+        <button id="reset">Reset</button>
+      </div>
+    </section>
+
+    <section>
+      <h2>DN override <span class="note">(debug)</span></h2>
+      <label>forward <span id="fwdv">0.00</span>
+        <input type="range" id="fwd" min="-1" max="1" step="0.05" value="0"></label>
+      <label>turn <span id="turnv">0.00</span>
+        <input type="range" id="turn" min="-1" max="1" step="0.05" value="0"></label>
+      <div class="row" style="margin-top:8px">
+        <button id="stop" aria-pressed="false">Stop</button>
+        <button id="clear">Clear</button>
+      </div>
+      <p class="warn">Biases the decoded drive directly. A debug lever, not a biological mechanism.</p>
+    </section>
+
+    <section>
+      <h2>Metrics</h2>
+      <dl>
+        <dt>step</dt><dd id="m-step">&mdash;</dd>
+        <dt>preset</dt><dd id="m-preset">&mdash;</dd>
+        <dt>mode</dt><dd id="m-mode">&mdash;</dd>
+        <dt>speed (mm/s)</dt><dd id="m-speed">&mdash;</dd>
+        <dt>gait regularity</dt><dd id="m-gait">&mdash;</dd>
+        <dt>fwd drive</dt><dd id="m-fwd">&mdash;</dd>
+        <dt>turn drive</dt><dd id="m-turn">&mdash;</dd>
+        <dt>mean rate (Hz)</dt><dd id="m-rate">&mdash;</dd>
+        <dt>neurons</dt><dd id="m-neurons">&mdash;</dd>
+      </dl>
+    </section>
+  </div>
+</main>
+
+<script>
+const proto = location.protocol === "https:" ? "wss:" : "ws:";
+const view = document.getElementById("view");
+const statusEl = document.getElementById("status");
+let controlSock = null, paused = false;
+
+function setStatus(t, ok) { statusEl.textContent = t; statusEl.style.color = ok ? "" : "#d8a657"; }
+
+// Frames: binary JPEG over its own socket, so a slow control message never
+// stalls the video and vice versa.
+function connectFrames() {
+  const s = new WebSocket(`${proto}//${location.host}/ws/frames`);
+  s.binaryType = "blob";
+  let url = null;
+  s.onmessage = (e) => {
+    if (!(e.data instanceof Blob)) return;
+    const next = URL.createObjectURL(e.data);
+    view.src = next;
+    if (url) URL.revokeObjectURL(url);
+    url = next;
+  };
+  s.onclose = () => setTimeout(connectFrames, 1500);
+}
+
+function connectControl() {
+  controlSock = new WebSocket(`${proto}//${location.host}/ws/control`);
+  controlSock.onopen = () => setStatus("connected", true);
+  controlSock.onclose = () => { setStatus("disconnected — retrying", false); setTimeout(connectControl, 1500); };
+  controlSock.onmessage = (e) => {
+    const m = JSON.parse(e.data);
+    if (m.presets) renderPresets(m.presets, m.preset);
+    if (m.metrics) renderMetrics(m.metrics);
+  };
+}
+
+function send(obj) {
+  if (controlSock && controlSock.readyState === 1) controlSock.send(JSON.stringify(obj));
+}
+
+function renderPresets(names, current) {
+  const box = document.getElementById("presets");
+  if (box.dataset.built === "1") {
+    [...box.children].forEach(b => b.setAttribute("aria-pressed", String(b.textContent === current)));
+    return;
+  }
+  box.innerHTML = "";
+  names.forEach(n => {
+    const b = document.createElement("button");
+    b.textContent = n;
+    b.setAttribute("aria-pressed", String(n === current));
+    b.onclick = () => send({ cmd: "preset", name: n });
+    box.appendChild(b);
+  });
+  box.dataset.built = "1";
+}
+
+const fmt = (v, d = 3) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+function renderMetrics(m) {
+  document.getElementById("m-step").textContent = m.step ?? "—";
+  document.getElementById("m-preset").textContent = m.preset ?? "—";
+  document.getElementById("m-mode").textContent = m.mode ?? "—";
+  document.getElementById("m-speed").textContent = fmt(m.speed_mm_s, 2);
+  document.getElementById("m-gait").textContent = fmt(m.gait_regularity);
+  document.getElementById("m-fwd").textContent = fmt(m.forward);
+  document.getElementById("m-turn").textContent = fmt(m.turn);
+  document.getElementById("m-rate").textContent = fmt(m.mean_rate_hz, 1);
+  document.getElementById("m-neurons").textContent = m.n_neurons ?? "—";
+  document.getElementById("m-preset").textContent = m.preset ?? "—";
+}
+
+document.getElementById("pause").onclick = (e) => {
+  paused = !paused;
+  e.target.textContent = paused ? "Resume" : "Pause";
+  send({ cmd: paused ? "pause" : "resume" });
+};
+document.getElementById("reset").onclick = () => send({ cmd: "reset" });
+
+for (const [id, key] of [["fwd", "forward"], ["turn", "turn"]]) {
+  const el = document.getElementById(id);
+  el.oninput = () => {
+    document.getElementById(id + "v").textContent = Number(el.value).toFixed(2);
+    send({ cmd: "override", [key]: Number(el.value) });
+  };
+}
+document.getElementById("stop").onclick = (e) => {
+  const on = e.target.getAttribute("aria-pressed") !== "true";
+  e.target.setAttribute("aria-pressed", String(on));
+  send({ cmd: "override", stop: on ? 1 : 0 });
+};
+document.getElementById("clear").onclick = () => {
+  ["fwd", "turn"].forEach(id => {
+    document.getElementById(id).value = 0;
+    document.getElementById(id + "v").textContent = "0.00";
+  });
+  document.getElementById("stop").setAttribute("aria-pressed", "false");
+  send({ cmd: "clear_override" });
+};
+
+connectFrames();
+connectControl();
+</script>
