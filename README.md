@@ -335,14 +335,20 @@ explicit about what that means:
 
   | metric | dry_land | submerged_water | windy | hot | cold |
   |---|---|---|---|---|---|
-  | mean speed mm/s | 6.90 | **5.31** | 6.40 | 6.76 | 6.93 |
-  | peak speed mm/s | 25.5 | **16.1** | 36.2 | 45.7 | 38.6 |
-  | displacement mm | 6.70 | 5.80 | 4.48 | 5.00 | 6.18 |
+  | net speed mm/s | 5.55 | **3.73** | 5.57 | 5.60 | 5.55 |
+  | mean speed mm/s | 15.7 | **11.4** | 15.7 | 15.8 | 16.2 |
+  | straightness | 0.43 | 0.41 | 0.42 | 0.43 | 0.43 |
   | fell over | no | no | no | no | no |
 
-  Water costs ~23% of mean speed and ~37% of peak speed — the drag signature.
-  Sensory current in water is ~1.7x that on dry land, matching its
-  `mechanosensory_gain: 1.6`.
+  Water costs ~33% of net speed - the drag signature. Sensory current in water
+  is ~1.7x that on dry land, matching its `mechanosensory_gain: 1.6`.
+
+  Two speeds are reported because they mean different things. **Net speed** is
+  displacement over elapsed time and is the honest walking speed. **Mean speed**
+  averages instantaneous |velocity| and is inflated by per-step wobble. Path
+  length is worse still - it grows with the sampling rate, so quoting "mm/s
+  along the path" can report almost any number you like.
+
 - The web UI: WebSocket frame streaming, preset switching, DN override, and
   pause/resume/reset all confirmed against a running server.
 - `Dockerfile.offline` builds and its tests pass inside the container.

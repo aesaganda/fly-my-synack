@@ -30,8 +30,11 @@ _SUBCLASS_TO_POS = {"fl": "F", "ml": "M", "hl": "H"}
 
 # Population rates are compared against a reference firing rate so the decoded
 # drive is interpretable: a population firing at REFERENCE_RATE_HZ produces
-# tanh(1) = 0.76 of full drive. PLACEHOLDER tuning knobs, not measurements.
-REFERENCE_RATE_HZ = 60.0
+# tanh(1) = 0.76 of full drive. Set from the measured leg motor-pool rate of
+# ~13 Hz - at the previous value of 60 the brain commanded only 0.2 of full
+# speed, i.e. a 2 Hz stride against a real fly's 10-20 Hz.
+# PLACEHOLDER tuning knobs, not measurements.
+REFERENCE_RATE_HZ = 10.0
 TURN_REFERENCE_HZ = 25.0
 
 # How far per-leg drive may deviate from the mean. This is a STABILITY limit,

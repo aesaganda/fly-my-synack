@@ -40,8 +40,13 @@ class RunMetrics:
         traces = np.asarray(self.joint_traces) if self.joint_traces else np.zeros((1, 1))
         displacement = float(np.linalg.norm(path[-1] - path[0])) if len(path) > 1 else 0.0
         travelled = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum()) if len(path) > 1 else 0.0
+        # Net speed is the honest walking speed. mean_speed_mm_s is the mean of
+        # instantaneous |velocity| and is inflated by per-step wobble; path
+        # length is worse still, since it grows with the sampling rate.
+        elapsed = self.steps * 1e-4
         return {
             "steps": self.steps,
+            "net_speed_mm_s": float(displacement / elapsed) if elapsed else 0.0,
             "mean_speed_mm_s": float(speeds.mean()),
             "peak_speed_mm_s": float(speeds.max()),
             "net_displacement_mm": displacement,

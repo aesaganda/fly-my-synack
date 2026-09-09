@@ -119,6 +119,7 @@ def cmd_compare(args) -> int:
 
 
 _COMPARE_KEYS = [
+    ("net_speed_mm_s", "net speed mm/s"),
     ("mean_speed_mm_s", "mean speed mm/s"),
     ("peak_speed_mm_s", "peak speed mm/s"),
     ("net_displacement_mm", "displacement mm"),

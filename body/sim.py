@@ -21,31 +21,51 @@ from env.loader import EnvPreset, apply_physics
 DOFS_PER_LEG = 7
 COXA_PITCH, FEMUR_PITCH, TIBIA_PITCH, TARSUS_PITCH = 1, 3, 5, 6
 
-# The step cycle.
+# The step cycle, derived from the model's measured foot Jacobian rather than
+# guessed. Displacement of the front-left foot relative to the thorax, per
+# +0.5 rad on each joint (mm):
 #
-# Fore-aft foot position follows sin(phase). The leg EXTENDS (femur/tibia/tarsus
-# pitch up) over the half-cycle where cos(phase) > 0, and that extension is what
-# presses the foot into the ground - so that half-cycle is STANCE, and adhesion
-# must be on for it. Defining stance as the other half (cos <= 0) leaves the leg
-# extending into the ground with no adhesion, which levers the body upward: the
-# fly rears monotonically (pitch climbing past +50 deg) and eventually capsizes
-# onto its back. That failure only appears at the low stride frequencies the
-# brain actually commands, which is why a fast open-loop test does not catch it.
-# Sign is negative because the coxa pitch axis is mirrored left-to-right
-# (NeuroMechFly is built with mirror_left2right=True); with +sin the two sides
-# push against each other and the fly rotates on the spot instead of walking.
-# Verified empirically: +sin gives 0.2 mm of travel per second, -sin gives 4 mm.
-# -0.6 rather than a larger stride: swept against travel AND stability, a
-# bigger protraction pitches the body enough that the fly eventually capsizes
-# once the brain starts modulating the legs asymmetrically. -0.6 travels
-# further (6.7 mm/s vs 1.5) and keeps a margin against tipping.
-PROTRACTION_RAD = -0.6   # coxa fore-aft amplitude
-EXTEND_FEMUR_RAD = 0.6   # femur extension during stance
-EXTEND_TIBIA_RAD = 0.8   # tibia extension during stance
-EXTEND_TARSUS_RAD = 0.3
-# PLACEHOLDER amplitudes: picked by a coarse sweep for net forward travel, not
-# fitted to recorded Drosophila kinematics. Real flies walk ~10-20 mm/s; this
-# gait manages ~4 mm/s, so it locomotes but is not a quantitative match.
+#     joint          fore/aft      height
+#     coxa  pitch +   +0.116       -0.089     -> protracts the foot
+#     femur pitch +   -0.195       -0.467     -> drives the foot DOWN
+#     femur pitch -   -0.024       +0.312     -> lifts the foot
+#     tibia pitch +   -0.287       -0.268     -> retracts the foot, strongly
+#
+# So fore-aft travel comes from coxa AND tibia together, and the femur is the
+# lift. phase 0 = foot fully forward and planted; stance is sin(phase) >= 0,
+# over which the coxa retracts and the tibia extends, carrying the foot
+# backwards and the body forwards. During swing the femur flexes to lift the
+# foot clear.
+#
+# Two earlier versions of this were wrong in instructive ways: clipping the
+# extension to max(0, cos) left the swing leg sitting at its neutral STANDING
+# pose, so it dragged along the ground and cancelled the stance legs' thrust;
+# and defining stance as the other half-cycle made the leg extend into the
+# ground with adhesion off, levering the fly onto its back.
+# NeuroMechFly is built with mirror_left2right=True, so the left and right leg
+# joint axes point in opposite directions and the same joint offset sweeps the
+# two sides opposite ways. Without this sign the fly walks in a circle: yaw
+# drifts about -345 deg over 30k steps (a ~3.5 mm radius). With it, the drift
+# falls to roughly +26 deg over 20k steps and forward speed nearly doubles.
+SIDE_SIGN = np.array([1.0 if leg.startswith("L") else -1.0 for leg in LEG_ORDER])
+
+# The tibia is deliberately NOT used for the fore-aft sweep. Measured foot
+# travel per +0.5 rad of tibia pitch:
+#     front  dx = -0.275   (foot moves backward)
+#     mid    dx = -0.094
+#     hind   dx = +0.234   (foot moves FORWARD)
+# A single tibia sweep therefore propels the front legs while fighting the hind
+# ones, which shows up as a nose-up pitch bias of ~30 deg. Giving the hind pair
+# the opposite sign fixes the pitch but shortens the stride so much that speed
+# collapses. Driving the sweep from the coxa alone - which IS consistent across
+# all three pairs (+0.11 to +0.17 forward) - is both faster and better postured.
+COXA_SWING_RAD = 2.5     # fore-aft sweep at the thorax-coxa joint
+FEMUR_LIFT_RAD = 1.4     # femur flexion lifting the foot during swing
+# PLACEHOLDER amplitudes: chosen by a sweep against forward speed AND postural
+# stability. This gait tops out around 6 mm/s in a straight line, against the
+# 10-20 mm/s a real fly walks, and the coxa excursion is larger than a real
+# fly's. It moves the model convincingly; it is not a reproduction of measured
+# Drosophila kinematics.
 
 THORAX_SEGMENT = "c_thorax"
 FALL_HEIGHT_MM = 0.25   # thorax centre below this = collapsed onto the ground
@@ -63,6 +83,7 @@ class FlyBody:
         render: bool = False,
         seed: int = 0,
         actuator_gain: float = 20.0,
+        adhesion_gain: float = 20.0,
         camera_res: tuple[int, int] = (360, 480),
     ) -> None:
         # Imported here so `import body.legs` stays cheap and flygym-free.
@@ -86,7 +107,9 @@ class FlyBody:
         self.fly.add_actuators(
             dofs, actuator_type=ActuatorType.POSITION, kp=actuator_gain, neutral_input=neutral
         )
-        self.fly.add_leg_adhesion()
+        # Stronger than the default 1.0: the foot otherwise slips during stance
+        # and a stride delivers far less travel than its geometry implies.
+        self.fly.add_leg_adhesion(gain=adhesion_gain)
         self._camera = self.fly.add_tracking_camera() if render else None
 
         world = FlatGroundWorld()
@@ -182,17 +205,19 @@ class FlyBody:
 
     @staticmethod
     def stance_mask(phase: np.ndarray) -> np.ndarray:
-        """True where the foot is planted and pushing (the extension half-cycle)."""
-        return np.cos(phase) >= 0.0
+        """True where the foot is planted and pushing."""
+        return np.sin(phase) >= 0.0
 
     def joint_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
         """Turn six leg phases into 42 joint-angle targets."""
         offsets = np.zeros((len(phase), DOFS_PER_LEG))
-        extend = np.maximum(0.0, np.cos(phase))  # nonzero only during stance
-        offsets[:, COXA_PITCH] = PROTRACTION_RAD * np.sin(phase)
-        offsets[:, FEMUR_PITCH] = EXTEND_FEMUR_RAD * extend
-        offsets[:, TIBIA_PITCH] = EXTEND_TIBIA_RAD * extend
-        offsets[:, TARSUS_PITCH] = EXTEND_TARSUS_RAD * extend
+        lift = np.maximum(0.0, -np.sin(phase))  # nonzero only during swing
+        offsets[:, COXA_PITCH] = COXA_SWING_RAD * np.cos(phase) * SIDE_SIGN
+        # The tibia only helps the femur lift the foot clear during swing.
+        offsets[:, TIBIA_PITCH] = -0.5 * FEMUR_LIFT_RAD * lift
+        # The femur lift is NOT mirrored: "up" is the same direction on both
+        # sides, so flexing it needs the same sign left and right.
+        offsets[:, FEMUR_PITCH] = -FEMUR_LIFT_RAD * lift
         offsets *= amplitude[:, None]
         return self.neutral_angles + offsets.reshape(-1)
 
