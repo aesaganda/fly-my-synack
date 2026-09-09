@@ -34,11 +34,14 @@ def _run(preset_name: str) -> dict:
         if i % 20 == 0:
             angles.append(obs["joint_angles"])
             speeds.append(obs["speed"])
+    roll, pitch = body.orientation_deg()
     body.close()
     return {
         "angles": np.asarray(angles),
         "speed": float(np.mean(speeds)),
         "displacement": float(np.linalg.norm((obs["position"] - start)[:2])),
+        "roll": roll,
+        "pitch": pitch,
     }
 
 
@@ -59,8 +62,26 @@ def test_water_changes_joint_kinematics(dry, water):
 
 
 def test_water_slows_the_fly(dry, water):
-    """~1000x the medium density has to cost something in drag."""
-    assert water["displacement"] < dry["displacement"]
+    """~1000x the medium density has to cost something in drag.
+
+    Measured on mean speed rather than net displacement: over a few thousand
+    steps displacement is dominated by heading wander, whereas speed is the
+    direct signature of drag. (Brain-driven 30k-step runs show the same thing
+    more strongly: 4.7 mm/s submerged vs 6.9 mm/s on dry land.)
+    """
+    assert water["speed"] < dry["speed"]
+
+
+def test_the_fly_stays_upright(dry, water):
+    """The gait must keep the animal on its feet.
+
+    This exists because an earlier version passed every other test while the
+    fly rolled onto its back and flailed: a height-only fall check could not
+    see it, since an upended fly's thorax sits well above the floor.
+    """
+    for name, run in (("dry_land", dry), ("submerged_water", water)):
+        assert abs(run["roll"]) < 90.0, f"{name}: fly capsized (roll {run['roll']:.0f} deg)"
+        assert abs(run["pitch"]) < 75.0, f"{name}: fly pitched over ({run['pitch']:.0f} deg)"
 
 
 def test_dry_land_is_reproducible():

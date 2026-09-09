@@ -21,26 +21,39 @@ from env.loader import EnvPreset, apply_physics
 DOFS_PER_LEG = 7
 COXA_PITCH, FEMUR_PITCH, TIBIA_PITCH, TARSUS_PITCH = 1, 3, 5, 6
 
-# The step cycle. Fore-aft position of the foot follows sin(phase), so the foot
-# is travelling BACKWARDS (relative to the body, i.e. pushing it forward)
-# exactly while cos(phase) < 0. That is therefore stance; the rest is swing,
-# and the leg only lifts during swing. Getting this 90 degrees out - lifting on
-# sin(phase) instead - makes the leg undo its own thrust and the fly marches on
-# the spot.
+# The step cycle.
+#
+# Fore-aft foot position follows sin(phase). The leg EXTENDS (femur/tibia/tarsus
+# pitch up) over the half-cycle where cos(phase) > 0, and that extension is what
+# presses the foot into the ground - so that half-cycle is STANCE, and adhesion
+# must be on for it. Defining stance as the other half (cos <= 0) leaves the leg
+# extending into the ground with no adhesion, which levers the body upward: the
+# fly rears monotonically (pitch climbing past +50 deg) and eventually capsizes
+# onto its back. That failure only appears at the low stride frequencies the
+# brain actually commands, which is why a fast open-loop test does not catch it.
 # Sign is negative because the coxa pitch axis is mirrored left-to-right
 # (NeuroMechFly is built with mirror_left2right=True); with +sin the two sides
 # push against each other and the fly rotates on the spot instead of walking.
 # Verified empirically: +sin gives 0.2 mm of travel per second, -sin gives 4 mm.
-PROTRACTION_RAD = -1.0   # coxa fore-aft amplitude
-LIFT_FEMUR_RAD = 0.6     # femur lift during swing
-LIFT_TIBIA_RAD = 0.8     # tibia extension during swing
-LIFT_TARSUS_RAD = 0.3
+# -0.6 rather than a larger stride: swept against travel AND stability, a
+# bigger protraction pitches the body enough that the fly eventually capsizes
+# once the brain starts modulating the legs asymmetrically. -0.6 travels
+# further (6.7 mm/s vs 1.5) and keeps a margin against tipping.
+PROTRACTION_RAD = -0.6   # coxa fore-aft amplitude
+EXTEND_FEMUR_RAD = 0.6   # femur extension during stance
+EXTEND_TIBIA_RAD = 0.8   # tibia extension during stance
+EXTEND_TARSUS_RAD = 0.3
 # PLACEHOLDER amplitudes: picked by a coarse sweep for net forward travel, not
 # fitted to recorded Drosophila kinematics. Real flies walk ~10-20 mm/s; this
 # gait manages ~4 mm/s, so it locomotes but is not a quantitative match.
 
 THORAX_SEGMENT = "c_thorax"
-FALL_HEIGHT_MM = 0.25  # thorax centre below this = collapsed onto the ground
+FALL_HEIGHT_MM = 0.25   # thorax centre below this = collapsed onto the ground
+# A height check alone is blind to the failure that actually happens: the fly
+# rolls onto its back while its thorax stays well above FALL_HEIGHT_MM. Check
+# orientation too.
+FALL_ROLL_DEG = 90.0
+FALL_PITCH_DEG = 75.0
 
 
 class FlyBody:
@@ -158,19 +171,28 @@ class FlyBody:
     def _thorax_position(self) -> np.ndarray:
         return np.asarray(self.sim.get_body_positions(self.name)[self._thorax_idx], dtype=float)
 
+    def orientation_deg(self) -> tuple[float, float]:
+        """Thorax roll and pitch in degrees, from the body quaternion (wxyz)."""
+        w, x, y, z = np.asarray(
+            self.sim.get_body_rotations(self.name)[self._thorax_idx], dtype=float
+        )
+        roll = np.degrees(np.arctan2(2 * (w * x + y * z), 1 - 2 * (x * x + y * y)))
+        pitch = np.degrees(np.arcsin(np.clip(2 * (w * y - z * x), -1.0, 1.0)))
+        return float(roll), float(pitch)
+
     @staticmethod
     def stance_mask(phase: np.ndarray) -> np.ndarray:
-        """True where the foot should be planted and pushing."""
-        return np.cos(phase) <= 0.0
+        """True where the foot is planted and pushing (the extension half-cycle)."""
+        return np.cos(phase) >= 0.0
 
     def joint_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
         """Turn six leg phases into 42 joint-angle targets."""
         offsets = np.zeros((len(phase), DOFS_PER_LEG))
-        lift = np.maximum(0.0, np.cos(phase))  # nonzero only during swing
+        extend = np.maximum(0.0, np.cos(phase))  # nonzero only during stance
         offsets[:, COXA_PITCH] = PROTRACTION_RAD * np.sin(phase)
-        offsets[:, FEMUR_PITCH] = LIFT_FEMUR_RAD * lift
-        offsets[:, TIBIA_PITCH] = LIFT_TIBIA_RAD * lift
-        offsets[:, TARSUS_PITCH] = LIFT_TARSUS_RAD * lift
+        offsets[:, FEMUR_PITCH] = EXTEND_FEMUR_RAD * extend
+        offsets[:, TIBIA_PITCH] = EXTEND_TIBIA_RAD * extend
+        offsets[:, TARSUS_PITCH] = EXTEND_TARSUS_RAD * extend
         offsets *= amplitude[:, None]
         return self.neutral_angles + offsets.reshape(-1)
 
@@ -190,6 +212,7 @@ class FlyBody:
         self._prev_pos = pos
         self.last_speed = float(np.linalg.norm(velocity[:2]))
 
+        roll, pitch = self.orientation_deg()
         return {
             "position": pos,
             "speed": self.last_speed,
@@ -197,7 +220,13 @@ class FlyBody:
             "contact_found": np.asarray(contact_found) > 0,  # float sensor, not a bool
             "air_speed": float(np.linalg.norm(velocity - self._wind)),
             "joint_angles": np.asarray(self.sim.get_joint_angles(self.name)),
-            "fell_over": bool(pos[2] < FALL_HEIGHT_MM),
+            "roll_deg": roll,
+            "pitch_deg": pitch,
+            "fell_over": bool(
+                pos[2] < FALL_HEIGHT_MM
+                or abs(roll) > FALL_ROLL_DEG
+                or abs(pitch) > FALL_PITCH_DEG
+            ),
         }
 
     def reset(self) -> None:

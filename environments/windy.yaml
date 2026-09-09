@@ -1,6 +1,6 @@
 name: windy
 description: >
-  Dry air at 25C with a steady 0.5 m/s lateral breeze. NOTE: MuJoCo's `wind` is
+  Dry air at 25C with a steady 0.15 m/s lateral draught. NOTE: MuJoCo's `wind` is
   subtracted from body velocity and the resulting force scales with density and
   viscosity - so wind with zero density would be a silent no-op. Density is
   nonzero here on purpose.
@@ -9,7 +9,12 @@ units: mm_g_s
 physics:
   density: 1.184e-6
   viscosity: 1.84e-5
-  wind: [500.0, 0.0, 0.0]   # 0.5 m/s along +x, in mm/s
+  # 0.15 m/s along +x, in mm/s. Deliberately a draught rather than a breeze:
+  # this model fly is only marginally stable, and a crosswind above roughly
+  # 0.25 m/s rolls it onto its back (measured: 250 mm/s capsizes it after ~18k
+  # steps, 500 mm/s after ~3.4k, 150 mm/s stays upright past 30k). Raise it if
+  # you want to study being blown over; keep it here to study walking in wind.
+  wind: [150.0, 0.0, 0.0]
   gravity: [0.0, 0.0, -9810.0]
   integrator: Euler
 

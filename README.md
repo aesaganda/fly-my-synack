@@ -98,7 +98,7 @@ flail.
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
 | `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
 | `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
-| `windy` | dry air + 0.5 m/s | 25 °C | lateral wind |
+| `windy` | dry air + 0.15 m/s | 25 °C | lateral draught |
 
 ```bash
 python3 run.py --list-envs
@@ -114,7 +114,7 @@ million.**
 |---|---|---|---|---|
 | `density` | g/mm³ | `1.184e-6` | `9.98e-4` | ×1e-6 |
 | `viscosity` | g/(mm·s) | `1.84e-5` | `1.002e-3` | ×1 (unchanged) |
-| `wind` | mm/s | `500` = 0.5 m/s | — | ×1e3 |
+| `wind` | mm/s | `150` = 0.15 m/s | — | ×1e3 |
 | `gravity` | mm/s² | `-9810` | | ×1e3 |
 
 Every preset declares `units: mm_g_s` and the loader rejects anything else.
@@ -212,7 +212,8 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Tonic drive (1.05)** | With `--neuron-subset motor` everything upstream of the DNs is missing, so nothing would reach threshold. A constant background current stands in for the absent network. |
 | **Sensory encoding** | Contact force is injected into each leg's *motor* pool as a proprioceptive stand-in; a scalar air-motion term stands in for Johnston's organ. Real `vnc_sensory` neurons are used when the loaded subset contains them. Anatomically crude either way. |
 | **Sensory gains per preset** | Reasoned, not measured. Humidity and immersion plausibly change mechanosensory and antennal input; the numbers are invented. |
-| **Gait joint amplitudes** | Chosen by a coarse sweep for net forward travel. Real flies walk ~10–20 mm/s; this gait manages ~4–8 mm/s. |
+| **Gait joint amplitudes** | Chosen by a sweep for forward travel *and* postural stability. Real flies walk ~10–20 mm/s; this gait manages ~5–7 mm/s. |
+| **Postural margin** | The model fly is only marginally stable. A crosswind above ~0.25 m/s rolls it onto its back, so `windy` is set to a 0.15 m/s draught. Per-leg drive is limited to ±25% for the same reason. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
 
@@ -325,26 +326,46 @@ explicit about what that means:
 
 **Actually run and verified**
 
-- All 45 tests pass.
+- All 46 tests pass, from a clean checkout via `./run.sh test`.
 - **The real connectome runs.** `male-cns:v1.0` fetched live from neuPrint:
-  2,129 neurons and **104,411 real synaptic edges**, driving a walking fly at
-  ~10 mm/s with the gait locked (regularity 1.000).
-- `--compare-envs` on real connectome data, 12,000 steps each:
+  2,129 neurons and **104,411 real synaptic edges**.
+- **The fly stays upright and walks in all six presets** for 30,000 steps
+  (3 s of simulated time) — verified on body roll/pitch, not just height.
+- `--compare-envs` on real connectome data, 30,000 steps each:
 
   | metric | dry_land | submerged_water | windy | hot | cold |
   |---|---|---|---|---|---|
-  | mean speed mm/s | 7.69 | **3.64** | 7.69 | 7.65 | 7.92 |
-  | peak speed mm/s | 61.2 | **15.9** | 80.9 | 70.3 | 77.4 |
-  | displacement mm | 1.33 | 2.48 | **7.08** | 1.71 | 5.24 |
-  | straightness | 0.12 | 0.46 | **0.65** | 0.15 | 0.44 |
+  | mean speed mm/s | 6.90 | **5.31** | 6.40 | 6.76 | 6.93 |
+  | peak speed mm/s | 25.5 | **16.1** | 36.2 | 45.7 | 38.6 |
+  | displacement mm | 6.70 | 5.80 | 4.48 | 5.00 | 6.18 |
+  | fell over | no | no | no | no | no |
 
-  Water halves mean speed and cuts peak speed ~4×; wind carries the fly
-  downwind (highest displacement and straightness). Sensory current in water is
-  ~1.7× that on dry land, matching its `mechanosensory_gain: 1.6`.
-- The fly stands and walks rather than collapsing (verified from rendered frames).
+  Water costs ~23% of mean speed and ~37% of peak speed — the drag signature.
+  Sensory current in water is ~1.7x that on dry land, matching its
+  `mechanosensory_gain: 1.6`.
 - The web UI: WebSocket frame streaming, preset switching, DN override, and
   pause/resume/reset all confirmed against a running server.
 - `Dockerfile.offline` builds and its tests pass inside the container.
+
+### A failure worth recording
+
+An earlier version of the gait defined stance as the wrong half of the step
+cycle, so each leg extended into the ground with adhesion off. That levers the
+body upward: the fly reared monotonically (pitch climbing past +50 deg) and
+capsized onto its back within a few thousand steps, then flailed there
+indefinitely.
+
+It passed every test at the time. Two things hid it:
+
+* `fell_over` only checked thorax height, and an upended fly's thorax sits well
+  above the floor. It now checks roll and pitch as well.
+* The open-loop gait tests drove the CPG at `forward = 1.0`, while the brain
+  actually commands about 0.2. The rearing only appears at low stride
+  frequency, so a fast test never saw it.
+
+`test_regression_env.py::test_the_fly_stays_upright` exists to stop this
+recurring, and the windy preset is documented with the crosswind at which the
+model capsizes.
 
 **Written but NOT executed**
 

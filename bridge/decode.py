@@ -34,6 +34,14 @@ _SUBCLASS_TO_POS = {"fl": "F", "ml": "M", "hl": "H"}
 REFERENCE_RATE_HZ = 60.0
 TURN_REFERENCE_HZ = 25.0
 
+# How far per-leg drive may deviate from the mean. This is a STABILITY limit,
+# not a modelling choice: at +/-0.8 the stride asymmetry between individual legs
+# rolls the fly onto its back within a few thousand steps (verified - with
+# per_leg_gain pinned to 1.0 the same run stays upright indefinitely). Keeping
+# the depth small preserves the connectome's per-leg influence without
+# capsizing the animal.
+PER_LEG_DEPTH = 0.25
+
 
 @dataclass
 class DescendingDrive:
@@ -106,13 +114,13 @@ class MotorDecoder:
         turn = float(np.clip(turn + self.override.get("turn", 0.0), -1.0, 1.0))
 
         per_leg = (
-            1.0 + np.tanh((leg_rates - leg_rates.mean()) / REFERENCE_RATE_HZ)
+            1.0 + PER_LEG_DEPTH * np.tanh((leg_rates - leg_rates.mean()) / REFERENCE_RATE_HZ)
             if leg_rates.size else np.ones(6)
         )
         return DescendingDrive(
             forward=forward,
             turn=turn,
-            per_leg_gain=np.clip(per_leg, 0.2, 1.8),
+            per_leg_gain=np.clip(per_leg, 1.0 - PER_LEG_DEPTH, 1.0 + PER_LEG_DEPTH),
             stop=bool(self.override.get("stop", 0.0) > 0.5),
         )
 
