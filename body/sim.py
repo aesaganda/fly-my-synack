@@ -59,8 +59,16 @@ SIDE_SIGN = np.array([1.0 if leg.startswith("L") else -1.0 for leg in LEG_ORDER]
 # the opposite sign fixes the pitch but shortens the stride so much that speed
 # collapses. Driving the sweep from the coxa alone - which IS consistent across
 # all three pairs (+0.11 to +0.17 forward) - is both faster and better postured.
-COXA_SWING_RAD = 2.5     # fore-aft sweep at the thorax-coxa joint
-FEMUR_LIFT_RAD = 1.4     # femur flexion lifting the foot during swing
+COXA_SWING_RAD = 1.8     # fore-aft sweep at the thorax-coxa joint
+FEMUR_LIFT_RAD = 1.0     # femur flexion lifting the foot during swing
+
+# Fraction of the cycle a leg spends in stance. At 0.5 (a pure sinusoid) the two
+# tripods hand over instantaneously and, because the stance legs are themselves
+# moving, the fly ends up with fewer than three feet down 65% of the time - it
+# bounces rather than walks, nodding +/-20 deg every stride. Above 0.5 the
+# tripods overlap, which restores real support. Insects likewise use a duty
+# factor above 0.5 at walking speeds.
+DUTY_FACTOR = 0.65
 # PLACEHOLDER amplitudes: chosen by a sweep against forward speed AND postural
 # stability. This gait tops out around 6 mm/s in a straight line, against the
 # 10-20 mm/s a real fly walks, and the coxa excursion is larger than a real
@@ -204,15 +212,30 @@ class FlyBody:
         return float(roll), float(pitch)
 
     @staticmethod
-    def stance_mask(phase: np.ndarray) -> np.ndarray:
+    def _cycle(phase: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Split the cycle into stance and swing at DUTY_FACTOR.
+
+        Returns (sweep, lift, is_stance). `sweep` runs +1 -> -1 across stance
+        (carrying the planted foot backwards, driving the body forwards) and
+        back over the shorter swing; `lift` is a half-sine confined to swing.
+        """
+        u = (phase / (2 * np.pi)) % 1.0
+        stance = u < DUTY_FACTOR
+        frac = np.where(stance, u / DUTY_FACTOR, (u - DUTY_FACTOR) / (1.0 - DUTY_FACTOR))
+        sweep = np.where(stance, np.cos(np.pi * frac), -np.cos(np.pi * frac))
+        lift = np.where(stance, 0.0, np.sin(np.pi * frac))
+        return sweep, lift, stance
+
+    @classmethod
+    def stance_mask(cls, phase: np.ndarray) -> np.ndarray:
         """True where the foot is planted and pushing."""
-        return np.sin(phase) >= 0.0
+        return cls._cycle(phase)[2]
 
     def joint_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
         """Turn six leg phases into 42 joint-angle targets."""
         offsets = np.zeros((len(phase), DOFS_PER_LEG))
-        lift = np.maximum(0.0, -np.sin(phase))  # nonzero only during swing
-        offsets[:, COXA_PITCH] = COXA_SWING_RAD * np.cos(phase) * SIDE_SIGN
+        sweep, lift, _ = self._cycle(phase)
+        offsets[:, COXA_PITCH] = COXA_SWING_RAD * sweep * SIDE_SIGN
         # The tibia only helps the femur lift the foot clear during swing.
         offsets[:, TIBIA_PITCH] = -0.5 * FEMUR_LIFT_RAD * lift
         # The femur lift is NOT mirrored: "up" is the same direction on both

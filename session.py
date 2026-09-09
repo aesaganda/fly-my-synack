@@ -39,7 +39,17 @@ class RunMetrics:
         speeds = np.asarray(self.speeds) if self.speeds else np.zeros(1)
         traces = np.asarray(self.joint_traces) if self.joint_traces else np.zeros((1, 1))
         displacement = float(np.linalg.norm(path[-1] - path[0])) if len(path) > 1 else 0.0
-        travelled = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum()) if len(path) > 1 else 0.0
+        # Straightness is measured on a STRIDE-INDEPENDENT decimation of the
+        # path. `path` is sampled every 100 steps, which is ~1/6 of a stride, so
+        # measuring path length on it charges the fly for its own body sway and
+        # reports ~0.43 for a trajectory that is actually near-straight. Sampling
+        # roughly every 3 strides gives ~0.95 for the same run. Path length is
+        # not a sampling-rate-free quantity, so the interval has to be pinned.
+        coarse = path[::20] if len(path) > 40 else path
+        travelled = (
+            float(np.linalg.norm(np.diff(coarse, axis=0), axis=1).sum())
+            if len(coarse) > 1 else 0.0
+        )
         # Net speed is the honest walking speed. mean_speed_mm_s is the mean of
         # instantaneous |velocity| and is inflated by per-step wobble; path
         # length is worse still, since it grows with the sampling rate.

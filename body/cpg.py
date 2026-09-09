@@ -18,7 +18,7 @@ from body.legs import LEG_ORDER
 _TRIPOD_A = (0, 4, 2)  # LF, RM, LH
 _TRIPOD_B = (3, 1, 5)  # RF, LM, RH
 
-BASE_FREQ_HZ = 15.0   # within the ~10-20 Hz stride frequency of a walking fly
+BASE_FREQ_HZ = 18.0   # within the ~10-20 Hz stride frequency of a walking fly
 COUPLING = 8.0        # phase-locking strength between legs
 
 
