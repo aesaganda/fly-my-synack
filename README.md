@@ -15,6 +15,30 @@ perturb both the physics and the neural dynamics.
 
 ## Quick start
 
+### Without Docker
+
+`run.sh` builds the whole stack into a local venv and runs it. It creates the
+venv on first use, so this works on a fresh checkout:
+
+```bash
+./run.sh test                         # build if needed, then run the tests
+./run.sh sim --env submerged_water --steps 20000
+./run.sh compare dry_land submerged_water windy
+./run.sh web                          # http://localhost:8000
+```
+
+Needs Python 3.12–3.14 (`brew install python@3.12`, or
+`apt install python3.12 python3.12-venv`). Behind a package mirror:
+
+```bash
+PIP_INDEX_URL=https://your-mirror/artifactory/api/pypi/pypi/simple ./run.sh setup
+```
+
+It also exports the macOS system CA bundle automatically, so neuPrint fetches
+work behind a TLS-inspecting proxy without extra setup.
+
+### With Docker
+
 No credentials and no network needed:
 
 ```bash
@@ -255,7 +279,9 @@ DOCKERFILE=Dockerfile.offline
 PIP_INDEX_URL=https://your-mirror/artifactory/api/pypi/pypi/simple
 ```
 
-That base image is `linux/amd64` only.
+That base image is `linux/amd64` only. It is used purely for the system
+libraries it already carries (libEGL, ffmpeg); its own Python environment is
+ignored and a clean venv is built on top.
 
 ### TLS behind an inspecting proxy
 
@@ -277,7 +303,8 @@ out when it happens.
 ## Tests
 
 ```bash
-docker compose run --rm sim python3 -m pytest tests/ -q
+./run.sh test                                          # native
+docker compose run --rm sim python3 -m pytest tests/ -q  # in the container
 ```
 
 | file | covers |
