@@ -22,9 +22,8 @@
 
 FROM nelyepfl/flygym:v2.1.0 AS deps
 ARG PIP_INDEX_URL=""
-# CPU-only torch: the plain linux/x86_64 wheel pulls ~3 GB of CUDA libraries
-# even when you never touch a GPU.
-ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+# Empty means "use the CPU-only index" - see the note by the pip install.
+ARG TORCH_INDEX=""
 
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONUNBUFFERED=1 \
@@ -35,8 +34,14 @@ COPY requirements.txt /tmp/requirements.txt
 # torch's own dependencies do not live on TORCH_INDEX, so they must still
 # resolve through PIP_INDEX_URL - otherwise pip falls back to
 # files.pythonhosted.org, which is the host that is blocked here.
+# The CPU-only torch index has to be defaulted HERE and not only on the ARG:
+# docker-compose passes `TORCH_INDEX: ${TORCH_INDEX:-}`, and an explicitly empty
+# build-arg overrides an ARG default, which turned this into
+# `pip install --index-url ""`. Same fix as the main Dockerfile.
+ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
 RUN if [ -n "$PIP_INDEX_URL" ]; then pip config set global.index-url "$PIP_INDEX_URL"; fi \
     && pip install --no-cache-dir --upgrade pip \
+    && TORCH_INDEX="${TORCH_INDEX:-$TORCH_CPU_INDEX}" \
     && pip install --no-cache-dir --index-url "$TORCH_INDEX" \
         ${PIP_INDEX_URL:+--extra-index-url "$PIP_INDEX_URL"} torch==2.14.0 \
     && pip install --no-cache-dir -r /tmp/requirements.txt
