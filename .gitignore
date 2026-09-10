@@ -6,3 +6,5 @@ data/
 runs/
 checkpoints/
 *.mp4
+# MuJoCo drops solver warnings here, in the working directory.
+MUJOCO_LOG.TXT

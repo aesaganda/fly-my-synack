@@ -2,8 +2,10 @@
 
 A biomechanical *Drosophila* body (FlyGym / NeuroMechFly v2 on MuJoCo) driven by
 a sparse spiking network whose **connectivity** comes from the Janelia male CNS
-connectome (`male-cns:v1.0`), runnable across six environment presets that
-perturb both the physics and the neural dynamics.
+connectome (`male-cns:v1.0`), runnable across seven environment presets that
+perturb both the physics and the neural dynamics — on bare ground, on a kitchen
+worktop under a Matrix sky, or in a room it explores by smell and crosses on the
+wing.
 
 > **Read this first.** This is a modelling toy built on real connectivity. It is
 > not biophysics and it is not a validated model of anything. The
@@ -23,8 +25,10 @@ venv on first use, so this works on a fresh checkout:
 ```bash
 ./run.sh test                         # build if needed, then run the tests
 ./run.sh sim --env submerged_water --steps 20000
+./run.sh sim --world kitchen --steps 40000   # a worktop, under a Matrix sky
+./run.sh sim --world room --steps 200000     # indoors, where it flies
 ./run.sh compare dry_land submerged_water windy
-./run.sh web                          # http://localhost:8000
+./run.sh web                          # http://localhost:8000 - kitchen by default
 ```
 
 Needs Python 3.12–3.14 (`brew install python@3.12`, or
@@ -53,11 +57,13 @@ docker compose run --rm sim python3 run.py \
   --compare-envs dry_land submerged_water windy --steps 20000
 ```
 
-Browser UI on <http://localhost:8080>:
+Browser UI on <http://localhost:8080> — the kitchen world by default:
 
 ```bash
 docker compose up web
 ```
+
+Set `WEB_PORT` if 8080 is taken, and `FLY_WORLD=flat` for bare ground.
 
 ---
 
@@ -69,10 +75,12 @@ CONNECTOME  (neuPrint male-cns:v1.0)
   -> descending neurons + VNC motor neurons as the output layer
        |
 BRIDGE   decode MN/DN population rates -> descending drive
-         encode contact + air motion -> injected current
+         encode contact + air motion + SMELL -> injected current
        |
 BODY     tripod CPG -> 42 leg joint targets -> MuJoCo
+         wingbeat + flight controller -> a wrench on the thorax
 ENV      preset YAML -> MuJoCo fluid options AND LIF time constants
+WORLD    scenery, collision, and where the smells are
        |
   sensory feedback -> spikes -> back into the network
 ```
@@ -121,6 +129,21 @@ million.**
 Every preset declares `units: mm_g_s` and the loader rejects anything else.
 `tests/test_env_loader.py` asserts water's density is ~1e-3 and not ~1000.
 
+### A Docker trap, for the record
+
+`docker compose build` did not work at all until this was found, and the failure
+mode is worth knowing about generally: **an explicitly empty `--build-arg`
+overrides an `ARG` default.** `docker-compose.yml` passes
+`TORCH_INDEX: ${TORCH_INDEX:-}`, which is an empty string rather than "unset",
+so `ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu` in the Dockerfile was
+silently replaced by `""` and the build ran `pip install --index-url ""`. The
+default now lives in the `RUN` (`${TORCH_INDEX:-$TORCH_CPU_INDEX}`), where an
+empty value falls through as intended.
+
+Worth the fix twice over: the CPU-only index has wheels for aarch64 as well as
+x86_64, and using it takes the image from **7.89 GB to 3.18 GB** — the ordinary
+PyPI torch wheel bundles CUDA on both architectures.
+
 ### Two MuJoCo traps this encodes
 
 1. `density: 0` disables lift/drag and `viscosity: 0` disables viscous forces.
@@ -132,6 +155,292 @@ Every preset declares `units: mm_g_s` and the loader rejects anything else.
 MuJoCo also warns that the Euler integrator handles body viscosity poorly, and
 FlyGym defaults to Euler — so `submerged_water` sets `integrator: implicitfast`.
 That is a YAML field, not a hardcoded special case.
+
+---
+
+## Worlds: bare ground, or a kitchen under a Matrix sky
+
+A **preset** is the medium the fly is in; a **world** is the place it is in.
+They are orthogonal — a preset writes to `mjOption`, a world writes geometry —
+so `--world kitchen --env windy` is a gusty kitchen and every preset still
+works in both.
+
+| `--world` | what it is | default for |
+|---|---|---|
+| `flat` | FlyGym's bare checkerboard plane. No scenery, no smells, no wings. | `run.py` |
+| `kitchen` | a worktop with crumbs, spills and crockery on it, under an animated digital-rain sky, and odour sources the fly can follow | — |
+| `room` | the same worktop, indoors: walls, ceiling, counter, table, fridge, a lamp, a window with the rain outside — **and air space, so the fly flies** | the browser UI (`FLY_WORLD`) |
+
+`flat` stays the CLI default deliberately: every kinematics number in this
+README was measured on bare ground, and the kitchen's smells steer the fly, so
+switching the default would silently invalidate them.
+
+The kitchen is a hand-placed vignette about 150 mm across — sugar, jam, crumbs,
+a chopping board, crockery, and the furniture on the horizon — plus 300 more
+crumbs and spills generated from a fixed seed out to 620 mm. That second part is
+not decoration: the fly nets ~9 mm/s, so it walks out of a hand-placed scene in
+under half a minute, and a browser demo runs for as long as the tab is open.
+
+It costs about 15% of the step rate — 1,075 against 1,271 steps/s on the dev
+machine, for 330 extra geoms, 80 extra collision pairs and an odour lookup at
+two antennae every step.
+
+### The sky
+
+MuJoCo compiles a skybox as six square faces stacked vertically in one texture
+(right, left, up, down, front, back, row 0 at the top — verified by rendering a
+gradient, not by trusting the docs). `body/world.py` generates green rain into
+that texture and re-uploads it to the GL context with `mjr_uploadTexture` on
+every rendered frame. Nothing is recompiled, and the phase comes from
+`mj_data.time` rather than a wall clock, so a run renders identically twice.
+
+One trap worth naming: FlyGym ships `zfar = 250` (× the unit model extent, so
+250 mm), which **silently deletes** anything further away. The first version of
+this scene had a mug and a toaster on the horizon that simply never rendered.
+`KitchenWorld.apply_visuals` pushes the far plane out, brings `znear` up with it
+so the depth buffer does not span 0.5 µm to 1.2 m, and turns on haze so the
+ground fades into the sky instead of ending at a hard edge.
+
+### What "exploring" means here
+
+**It is not consciousness and the code does not claim to be.** It is two small
+mechanisms in a closed loop, and both are there because removing them produces
+a specific, measured failure. Two further mechanisms were built, measured, and
+deleted for losing to the empty control — see
+[A failure worth recording](#a-failure-worth-recording).
+
+1. **Bilateral olfaction.** Concentration is sampled at the two antennae — the
+   third antennal segments, where the olfactory receptor neurons actually are —
+   and injected into the **left and right descending populations**. That is the
+   whole trick: `MotorDecoder` already reads its turn command as
+   `tanh((DN_R − DN_L) / ref)`, so a smell on the right raises DN_R and the fly
+   turns right, with no new decode path. Sign errors here produce a fly that
+   flees food, which looks like plausible behaviour, so
+   `tests/test_world.py::test_a_smell_on_the_right_produces_a_right_turn` pins
+   it.
+
+2. **Receptor adaptation.** A leaky baseline per antenna, subtracted before the
+   drive is computed. Without it the fly orbits the first source it finds for
+   ever — at the peak of a plume the gradient reverses on every pass and pulls
+   it straight back in. Adaptation is what lets it arrive, lose interest, and go
+   somewhere else; it is the mechanism that turns chemotaxis into exploration.
+
+That is the whole of it. The two together produce the behaviour: over 150k
+steps the fly leaves the spawn, tracks in on the sugar, habituates, wanders off,
+finds the cake, and stays inside about 116 mm of where it started, with a path
+straightness of 0.77 — a genuinely curved, looping trajectory rather than a walk
+across the frame. Nothing schedules any of that.
+
+Read the live values in the browser UI's **Exploring** panel, or in
+`Session.live_metrics()`: `odour`, `odour_lr_diff`, `nearest_source`.
+
+`--world flat` gets none of it, and it was bit-identical to the old code until
+the SciPy matmul landed. It still is *numerically* the same model — SciPy simply
+accumulates a float32 sum in a different order, which over 12,000 steps of a
+chaotic system diverges to about 1 part in 1e7 on `dry_land` and 0.1% on
+`windy`. `tests/test_world.py::test_flat_world_gets_none_of_the_new_machinery`
+pins the conditions that keep the *mechanism* out of the flat world.
+
+Environments reach this too. `olfactory_gain` in a preset says how well the fly
+can smell there — `windy` cuts it to 0.45 because a still-air Gaussian plume is
+not a description of wind-shredded filaments, and `submerged_water` to 0.15
+because airborne olfaction underwater is not a thing. See
+`environments/_README.md`.
+
+### Flight
+
+`--world room` gives the fly wings and somewhere to use them. It walks, tracks a
+smell, habituates, takes off, crosses the room, and lands on the next thing it
+smells — about four takeoffs a minute of simulated time.
+
+**The wings are real and they do not lift the fly.** Both halves matter:
+
+* Real: the wings are articulated bodies on the NeuroMechFly model with three
+  DoFs each. They beat at 200 Hz — a *Drosophila* wingbeat — with a feathering
+  flip at stroke reversal, driven by position actuators. What you see is a
+  wingbeat.
+* Not real: the forces. With MuJoCo's per-geom ellipsoid fluid model on the
+  wings, a full 6.6 mm feathered stroke at 200 Hz was swept across **every
+  feather phase from 0 to 360°** and both plausible stroke axes. The best net
+  vertical force found anywhere in that sweep was **0.072 × body weight**; most
+  phases gave |0.03| in either direction. Insect lift comes from the
+  leading-edge vortex, rotational circulation and wake capture, and a
+  quasi-steady fluid model has none of them. No amount of tuning gets 1.0 out of
+  0.07.
+
+So the aerodynamics are lumped into a controller that applies a wrench to the
+thorax — the same kind of approximation as the CPG generating the gait, and as
+buoyancy being folded into gravity. It commands *velocities*, not forces, which
+is both easier to steer and closer to what the animal does: a fly holds airspeed
+and attitude with haltere and visual feedback, not by setting muscle forces
+open-loop. The attitude and yaw-rate loops stand in for the halteres
+specifically — the model has them, they are mechanosensory rate gyros, and this
+is the one job they do.
+
+The connectome steers it exactly as it steers walking: decoded `forward` sets
+cruise speed, decoded `turn` sets yaw rate. Takeoff and landing come from the
+olfactory loop already there — receptor adaptation decides when the fly is
+*finished* with a smell, and leaving is what an animal does next.
+
+Three things needed a stand-in that is not connectome, all listed in the
+approximations table: airborne arousal (the same "no ground contact, no limb
+load, no drive" torpor that `submerged_water` documents), a contact-avoidance
+reflex, and knowing where the walls are.
+
+### The world has to be walkable
+
+This gait cannot climb and cannot reverse, and both limits are sharper than
+they look:
+
+* a wall **0.4 mm** high — half the fly's standing height — stops it dead;
+* running the CPG phase backwards does not walk it backwards, it walks it
+  *sideways*: the duty-factor asymmetry means the step cycle is not
+  time-reversible.
+
+So anything wide enough that the fly cannot slide off the end of it is a
+permanent trap. Only props small enough to slide past are given collision
+pairs — measured, the fly clears a 3.6 mm cube after about 13k steps of contact
+and walks away. Plates, boards and the far-off furniture are scenery it passes
+through; at the camera's 9 mm standoff that is invisible, and a plate rim the
+fly can never escape is not.
+
+---
+
+## Real time
+
+**The simulation runs at real time.** Measured on an M3 Pro as steps per second
+of *process CPU time*, five repetitions, median, `--world room`:
+
+| | steps/s | x real time |
+|---|---|---|
+| walking, `--control-every 1` *(the documented model)* | 3,724 | 0.37 |
+| walking, `--control-every 30` | 14,113 | **1.41** |
+| flying, `--control-every 30` | 14,174 | **1.42** |
+
+CPU time rather than wall time on purpose — see
+[measuring on a busy machine](#measuring-on-a-busy-machine) below, which is the
+most useful thing in this section.
+
+The **browser** gets that multiplied by the fraction of the clock left after
+rendering: a frame costs 10-12 ms to draw and JPEG-encode, so at the default
+50 ms stepping budget it keeps about 80%. The header reports what it actually
+achieved rather than claiming a figure.
+
+Getting even this far took finding out which of three obvious levers worked.
+
+### The physics timestep cannot move
+
+The first idea is to take bigger steps: real time is `1/dt` steps a second, so a
+coarser `dt` is a linear win. It is also the one thing this model cannot afford.
+Measured on `dry_land` in the kitchen:
+
+| timestep | x real time | net speed mm/s | slip | straightness | fell over |
+|---|---|---|---|---|---|
+| **1e-4** *(default)* | 0.35 | **8.57** | 0.60 | 0.97 | no |
+| 2e-4 | 0.44 | 26.03 | −0.09 | 0.93 | no |
+| 3e-4 | 0.77 | 1.18 | 0.61 | 0.42 | **yes** |
+| 4e-4 | 0.82 | 4.87 | −0.52 | 0.96 | **yes** |
+| 5e-4 | 1.37 | 2.82 | 0.54 | 0.89 | **yes** |
+
+At 2e-4 the fly's walking speed triples and the slip ratio goes negative, which
+is not a number that can happen; from 3e-4 it falls over. `--timestep` exists
+and is documented as a footgun.
+
+### MuJoCo was never the bottleneck
+
+`mj_step` on its own costs **62–68 µs** — a ceiling of about 15,000 steps a
+second, comfortably above the 10,000 real time needs. The full loop was managing
+3,400. **Four fifths of the time was Python**, not physics.
+
+### So run the controller slower than the physics
+
+The physics needs 1e-4 for contact stability. The *controller* does not: a
+stride is 55 ms long, so updating joint targets every 2 ms still samples it 27
+times. `--control-every N` runs the CPG, the brain, the sensory encoding and the
+observation readout once per N physics steps, and holds them in between.
+
+| `--control-every` | steps/s | x real time | net speed mm/s | slip | straightness |
+|---|---|---|---|---|---|
+| **1** *(the documented model)* | 2,521 | 0.25 | 9.17 | 0.58 | 0.98 |
+| 2 | 3,627 | 0.36 | 9.11 | 0.59 | 0.98 |
+| 5 | 5,463 | 0.55 | 9.38 | 0.57 | 0.98 |
+| 10 | 7,618 | 0.76 | 10.27 | 0.54 | 0.98 |
+| 20 | 10,673 | **1.07** | 8.62 | 0.60 | 0.88 |
+| **30** *(the browser default)* | 10,697 | **1.07** | 6.23 | 0.69 | 0.72 |
+| 40 | 12,291 | 1.23 | 2.14 | 0.89 | 0.27 |
+
+The gait is intact to 30 and gone by 40 - by which point the fly is shuffling,
+not walking. `run.py` defaults to 1 so the numbers elsewhere in this README stay
+reproducible; the web service defaults to 30, which measured 1.24x real time
+walking and 1.45x flying on an idle machine.
+
+### Measuring on a busy machine
+
+Every wall-clock number in this section was first measured wrong, and one
+conclusion was drawn backwards from it.
+
+The development machine was running several Kubernetes clusters, buildkit
+builders and assorted containers in the background: **load average 15+ on twelve
+cores, with the container runtime alone taking 551% CPU.** Against that, the
+same configuration measured anywhere between 2,225 and 10,603 steps/s on
+different runs — a four-fold spread that looked exactly like a real difference
+between configurations.
+
+It produced a confident wrong answer. MuJoCo's no-slip pass appeared to be half
+the cost of a physics step (183 µs against 88 µs without it), which would have
+been worth trading physics fidelity for. Re-measured as **process CPU time with
+five repetitions and a median**, dropping it is *slower*: 1.30x against 1.41x.
+The whole effect was scheduling noise. The option was written, measured, and
+deleted.
+
+If you are benchmarking this, use `time.process_time()`, repeat, and take the
+median. Wall-clock timing of a CPU-bound loop on a shared machine measures the
+machine, not the code.
+
+### Two things that had to be right
+
+**The sensory loop hung open.** Sensory input is encoded on the control step
+just before the network reads it, and the condition for that was written
+`(step_count + 1) % brain_every == 0`. Once control steps arrive `N` apart that
+condition can never fire — so at any `--control-every` above 1 the network saw
+nothing but its tonic drive, the decoded forward drive fell from 0.90 to 0.30,
+and the fly shuffled without travelling. It looked exactly like a physical
+problem with holding the joint targets. It was `+ 1` where `+ control_every`
+belonged.
+
+**The flight wrench genuinely needs the physics rate.** Holding it at the
+control rate tips the fly over — the attitude loop is a damper, and sampling a
+damper too slowly injects energy. But recomputing it cost 50 µs a step, most of
+the substep budget once `mj_step` is only 68. Rewriting `body_wrench` in plain
+scalars instead of NumPy three-vectors took it to **12 µs**: at this size NumPy's
+per-call overhead *was* the computation.
+
+### What it costs
+
+Frames are still paced on wall time, so a slower machine loses speed rather than
+smoothness. `FLY_CONTROL_EVERY=1` restores the documented model in the browser
+at about a quarter of real time.
+
+### Apple Metal (MPS)
+
+Supported — `--gpu mps`, or `FLY_DEVICE=mps` for the web service — and **it is
+the wrong choice for the default neuron subset.** Measured on an M3 Pro:
+
+| neurons | LIF step, CPU | LIF step, MPS |
+|---|---|---|
+| 2,129 (`--neuron-subset motor`, the default) | **90 µs** | 294 µs |
+| 20,000 (`vnc`) | 1,047 µs | **467 µs** |
+| 60,000 | 3,986 µs | **820 µs** |
+
+A LIF step is fourteen elementwise operations against one matrix multiply. Metal
+wins the multiply (36 µs against 55 µs at the default size, 4x at 60k neurons)
+and loses every elementwise op by ~12 µs each, which at this size is the whole
+budget. End to end the default subset runs at 1,588 steps/s on CPU against 567
+on MPS. The crossover is somewhere around 20k neurons, so Metal is for running a
+*bigger brain*, not for running this one faster.
+
+The same argument applies to CUDA, and is the reason the GPU path was never the
+answer to "why is it slow".
 
 ---
 
@@ -224,6 +533,20 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Gust model** | Two incommensurate sines per axis, so gusts do not look metronomic. It is not turbulence — there is no spatial structure, no eddies, and every part of the body sees the same wind at the same instant. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
+| **Odour as a Gaussian field** | Sources are static 2-D Gaussians summed in `body/world.py`. No advection, no turbulence, no filaments, and wind does not move them — the `windy` preset lowers `olfactory_gain` instead, which says "the cue is unreliable here" rather than pretending the model still holds. Plume widths are set by what the fly can navigate, not by chemistry. |
+| **Olfaction injected at the DNs** | Concentration at the two antennae is injected straight into the left and right descending populations. That skips the entire antennal lobe / lateral horn / mushroom body pathway and pretends the descending command already carries the olfactory decision. It is the right *target* — olfactory receptor neurons are in the antennae, nowhere near `vnc_sensory` — and a huge shortcut in *depth*. |
+| **Bilateral gain** | The antennae are 0.28 mm apart, so the left/right difference is ~1% of the concentration itself. A real fly closes that gap in *time* — casting its head and body and comparing successive samples — which a body with no neck joint cannot do. `ODOUR_BILATERAL_GAIN` stands in for the missing temporal comparison and is deliberately large; it was swept against how close the fly actually gets to a source, and the sweep is in the source. |
+| **Receptor adaptation** | One leaky integrator per antenna. Real ORN adaptation is multi-timescale. |
+| **No spontaneous turning** | Real flies make saccadic turns driven by the central complex, which is absent from the `motor` subset. Nothing here stands in for it — a stand-in was built and measured worse than nothing (see below), so what course changes the fly makes come from the odour loop and from the connectome's own left/right bias. |
+| **The worktop scatter** | 300 crumbs and spills generated from a fixed seed out to 620 mm, because the fly nets ~9 mm/s and a hand-placed vignette runs out in half a minute. Their positions carry no meaning. |
+| **Which props are solid** | Chosen by what the gait can survive, not by what a kitchen is like: anything the fly could wedge against permanently is scenery it passes through. See "The world has to be walkable". |
+| **The sky** | Decorative. It emits no light, casts no shadow and has no effect on the simulation; the fly has vision hardware in FlyGym that this project does not use. |
+| **Flight forces** | Lumped into a velocity controller applied as a wrench on the thorax. The wings are animated and generate none of it — measured at 0.072 body weights at best. See "Flight". |
+| **Attitude and yaw control** | A PD loop standing in for the halteres. Real haltere feedback is a campaniform reflex arc through specific neurons, none of which are in the loaded subset. |
+| **Airborne arousal** | Tonic drive is raised to 1.5 while flying. Same problem `submerged_water` documents: with no ground contact the leg pools starve of sensory input and the decoded drive decays to nothing — measured, the fly froze in mid-air to within 0.1 mm for 16 s. |
+| **Obstacle avoidance in flight** | A latched contact reflex. Note this is the *opposite* conclusion to walking, where the same idea measured worse than nothing: flying, yaw comes from the attitude controller and works whatever the fly is touching. |
+| **Knowing where the walls are** | The flight controller is told the room's bounds and turns back at the edge. A real fly does this with optic flow and the looming response; this model has eyes it does not use. Without it the fly worked itself into a corner and spent 25 s of a 50 s run climbing it. |
+| **Takeoff and landing** | A behavioural rule on top of the olfactory loop, not a connectome mechanism: take off when a smell is exhausted, commit to a landing when a new one appears. Real takeoff is a giant-fibre escape or a voluntary sequence; neither is modelled. |
 
 ---
 
@@ -232,9 +555,14 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 ```bash
 python3 run.py --list-envs
 python3 run.py --env submerged_water --steps 50000 --gpu 0 --render off
+python3 run.py --world kitchen --env temperate --steps 40000
 python3 run.py --compare-envs dry_land submerged_water windy --steps 20000
 python3 run.py --connectome synthetic --neuron-subset motor --steps 1000
 ```
+
+`--world {flat,kitchen,room}` picks the scenery, independently of `--env`. It
+defaults to `flat` so the comparison numbers below stay reproducible. Only
+`room` has air space in it, and only there does the fly get wings.
 
 `--compare-envs` saves one brain snapshot and reloads it for every preset, so
 differences between environments are not confounded by differences between
@@ -253,6 +581,23 @@ metrics.
 `docker compose up web`, then <http://localhost:8080>. Live MuJoCo view over a
 WebSocket (with an MJPEG fallback at `/stream.mjpg`), buttons for every preset,
 pause/resume/reset, a DN-override slider, and a metrics readout.
+
+It serves the **kitchen** world by default; set `FLY_WORLD=flat` for bare
+ground. World choice is start-up only — swapping worlds means recompiling the
+MuJoCo model and rebuilding the GL context, which cannot be done from the
+control socket's thread. Presets still switch live.
+
+**Real time.** The UI reports its own pace in the header (`19 fps · 0.85x real
+time`) — the figure it measured, not a claim. It gets there by running the controller at 500 Hz against physics at
+10 kHz — see [Real time](#real-time) — not by cutting corners in the physics.
+
+**Brain activity.** The control socket also pushes a spike raster and the
+population rates the decoder reads: the two DN pools that set `turn`, and the
+six leg motor pools that set `forward`. Each raster cell is a spike *count* over
+a 5 ms bin, not an instantaneous sample — a neuron at 100 Hz fires in about 2%
+of the 0.2 ms brain steps, so sampling once per bin would show an empty screen.
+Rows are drawn from those eight populations rather than at random, so you can
+watch DN_L and DN_R separate when the fly turns toward a smell.
 
 The DN override biases the decoded drive directly. It is a **debug lever**, not
 a biological mechanism — it exists so the demo does not depend on waiting for
@@ -324,6 +669,9 @@ docker compose run --rm sim python3 -m pytest tests/ -q  # in the container
 | `test_cpg.py` | tripods lock antiphase, turning asymmetry, stop freezes the gait |
 | `test_smoke.py` | 100 steps end to end; presets reach **both** physics and neurons; mid-run switching |
 | `test_regression_env.py` | dry vs submerged changes joint kinematics and slows the fly |
+| `test_world.py` | the kitchen keeps its ground-contact sensors, the sky animates and is reproducible, a smell on the right turns the fly right, receptors habituate, and the fly ends up nearer a source only when it can smell |
+| `test_flight.py` | the wingbeat strokes *and* feathers, the controller holds a hover and caps its manoeuvre force, attitude damping does not swamp the turn command, wings exist only in a flyable world, and landing clears the applied wrench |
+| `test_realtime.py` | a decimated control rate keeps the gait, keeps the sensory loop closed, and reproduces the default model exactly at `control_every=1` |
 
 ---
 
@@ -334,7 +682,7 @@ explicit about what that means:
 
 **Actually run and verified**
 
-- All 46 tests pass, from a clean checkout via `./run.sh test`.
+- All 73 tests pass, from a clean checkout via `./run.sh test`.
 - **The real connectome runs.** `male-cns:v1.0` fetched live from neuPrint:
   2,129 neurons and **104,411 real synaptic edges**.
 - **The fly stays upright and walks in all six presets** for 30,000 steps
@@ -380,14 +728,44 @@ explicit about what that means:
   distrusted - including one quoted earlier in this project's history, before
   the interval was pinned.
 
-- The web UI: WebSocket frame streaming, preset switching, DN override, and
-  pause/resume/reset all confirmed against a running server.
+- The web UI: WebSocket frame streaming, preset switching, DN override,
+  pause/resume/reset, **and the brain-activity raster** all confirmed against a
+  running server. The raster was checked against the reported rates rather than
+  by eye: the two DN bands come out 17–20% lit at 33–36 Hz and the six leg bands
+  27–32% lit at 52–55 Hz, in the right order.
+- **The kitchen world**, on the synthetic connectome: the fly tracks in on a
+  smell, habituates, leaves and finds another, over 150k-step runs on two seeds.
+  The odour gain, the plume width and the spontaneous-turn experiment were all
+  swept in-situ; the numbers are in the source next to the constants they set.
+- **`--world flat` is unchanged by the kitchen.** 12,000-step Sessions in
+  `dry_land`, `windy` and `cold` gave bit-identical metrics before and after it
+  landed. The later SciPy matmul reorders a float32 sum and so diverges
+  chaotically — same model, ~1e-7 relative on `dry_land`, 0.1% on `windy` after
+  12,000 steps.
+- **Real time for the simulation**: 1.41x walking and 1.42x flying in the room
+  against 0.37x for the documented model — a 3.8x speed-up, reached by
+  decoupling the control rate from the physics rate after measuring that the
+  timestep cannot be raised (the fly falls over) and that `mj_step` was only a
+  fifth of the loop. Measured in CPU time, because the development machine was
+  loaded to 15+ and wall-clock timing there had already produced one confidently
+  wrong conclusion. Metal was measured and rejected for the default subset. See
+  [Real time](#real-time).
 - `Dockerfile.offline` builds and its tests pass inside the container.
 - `Dockerfile` (the non-offline one) builds and runs on an unrestricted
   network: `docker build .` completes, and the built image fetched a real
   connectome from neuPrint during the data-fetch stage (2,129 neurons, 104,411
   edges) and ran `run.py --list-envs` correctly. Not re-run under `pytest`
   inside this container specifically.
+- **`docker compose build`, `docker compose up web` and
+  `docker compose run --rm sim` all work**, on linux/arm64 (Apple Silicon,
+  OrbStack) — after the fix described in
+  [A Docker trap](#a-docker-trap-for-the-record). Note that the plain
+  `docker build .` above was never affected by that bug: it only appears through
+  compose, which passes an explicitly empty `TORCH_INDEX`. The kitchen renders
+  headless through EGL in the container and the browser UI serves from it.
+  A container has no GPU, so it rasterises in software and the live view is much
+  slower there than natively; use Docker for batch runs, where `RENDER=off` is
+  the default anyway.
 
 ### A failure worth recording
 
@@ -409,6 +787,74 @@ It passed every test at the time. Two things hid it:
 recurring, and the windy preset is documented with the crosswind at which the
 model capsizes.
 
+### Four more, from building the kitchen
+
+Two of these are the same lesson twice, which is why both are here: a mechanism
+that is obviously necessary can be measured against not having it, and lose.
+
+**A reflex that made things worse.** The fly kept wedging against props, so the
+obvious fix was an obstacle-avoidance reflex: contact on the left drives DN_R,
+the fly turns away. Measured against a 3.6 mm cube on its path, over 60k steps:
+
+| escape turn | steps in contact | got past it |
+|---|---|---|
+| none | 13,214 | yes, at step 30,306, and walked 33 mm clear |
+| contralateral, 0.35 | 46,372 | no |
+| contralateral, 0.80 | 35,391 | no |
+| ipsilateral (wall-follow), 0.35 | 5,283 | no |
+| ipsilateral (wall-follow), 0.80 | 26,297 | no |
+
+Every variant was worse than doing nothing. Turning while pressed against a
+face only re-aims the fly into it; left alone, the same physics slides it along
+the face and off the end. The reflex was deleted and the world was changed
+instead — obstacles the fly cannot slide past are simply not solid. The lesson
+is narrow and worth keeping: an intervention that is obviously right can be
+measured, and this one lost to the empty control.
+
+**A spontaneous-turn drive that made things worse.** Chemotaxis can only pull
+the fly towards a plume it happens to pass, and with `--neuron-subset motor`
+nothing in the loaded network can produce a course change on its own — the
+central complex, which is where a fly's spontaneous turns come from, is missing
+entirely. So an Ornstein–Uhlenbeck bias between the DN pools was added to stand
+in for it, tuned against a measured current-to-turn curve so that it sat in the
+same band as the olfactory drive. Over 150k steps in the kitchen, two seeds:
+
+| | time within 15 mm of a source | straightness | furthest from spawn |
+|---|---|---|---|
+| spontaneous turning on | 4.7% / 8.1% | 0.97 / 0.96 | 144 / 141 mm |
+| off | **28.8% / 25.0%** | **0.77 / 0.77** | **116 / 116 mm** |
+
+Worse on every measure and in the same direction both times. The random bias
+kicks the fly out of the loops the odour gradient puts it into, so it ends up
+*straighter* — the opposite of the intended effect. Deleted.
+
+**Two frames that had to match.** Getting the fly to fly took three bugs that
+all looked like tuning problems and were not:
+
+* MuJoCo reports a free joint's angular velocity in the **body** frame while
+  `xfrc_applied` takes a torque in the **world** frame. Level, the two coincide,
+  so a hover looked perfect; the moment the fly tilted the attitude damping
+  became positive feedback and flipped it onto its back.
+* `xfrc_applied` acts at the *thorax body's* centre of mass, but the fly's mass
+  is spread over legs, head, abdomen and wings and its real centre of mass is
+  ~0.5 mm behind that. One body weight of pure forward force spun the fly to
+  9.3 rad/s of pitch in 0.3 s; in flight it showed up as a 13 rev/s spin the
+  instant any thrust was commanded.
+* The attitude loop was damped at a quarter of critical for the fly's
+  rotational inertia. That is invisible starting from equilibrium and tumbles on
+  the first disturbance.
+
+**A sky that was clipped away.** FlyGym ships `zfar = 250` (× the unit model
+extent, so 250 mm). The first version of the kitchen had a mug, a toaster and a
+backsplash on the horizon that never appeared in a single frame — no error, no
+warning, just nothing there.
+
+**Plumes that were too wide to follow.** Fifteen odour sources at σ 15–22 mm
+with ~50 mm spacing overlap into a smooth field with no gradient left in it: the
+fly walked 150k steps at straightness 0.98 and never came within 12 mm of
+anything. Halving σ separated the plumes and it started tracking. More signal
+made the problem worse, which is not the direction intuition points.
+
 **Written but NOT executed**
 
 - **Everything CUDA.** No NVIDIA GPU was available; `nvidia/cuda` images are
@@ -417,6 +863,9 @@ model capsizes.
 - **The Feather path.** `storage.googleapis.com` is blocked on the development
   network, so the bulk files were never downloaded and their column names were
   never confirmed. Run the `--schema` command above before trusting it.
+- **The compose path on linux/amd64.** `docker compose build` is verified on
+  arm64 only; the amd64 path is the same recipe with the same wheels and should
+  behave, but it has not been run since the fix.
 
 ---
 

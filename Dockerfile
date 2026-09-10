@@ -20,7 +20,7 @@ ARG BASE_IMAGE=python:3.12-trixie
 
 # ---------------------------------------------------------------- deps -----
 FROM ${BASE_IMAGE} AS deps
-ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
+ARG TORCH_INDEX=""
 ARG PIP_INDEX_URL=""
 ENV DEBIAN_FRONTEND=noninteractive PIP_NO_CACHE_DIR=1
 
@@ -37,8 +37,20 @@ RUN python3 -m venv /opt/venv
 ENV PATH=/opt/venv/bin:$PATH
 
 COPY requirements.txt /tmp/requirements.txt
+# torch is not in requirements.txt: the ordinary PyPI wheel bundles CUDA even
+# for CPU-only use, on aarch64 as well as x86_64 - measured, it is the whole
+# difference between a 2 GB image and an 8 GB one. The +cpu index has wheels
+# for both, so it is the default here.
+#
+# The default lives in this RUN and not only in the ARG because docker-compose
+# passes `TORCH_INDEX: ${TORCH_INDEX:-}`, and an explicitly empty build-arg
+# OVERRIDES an ARG default. With the default only on the ARG this became
+# `pip install --index-url ""` and `docker compose build` failed outright.
+ARG TORCH_CPU_INDEX=https://download.pytorch.org/whl/cpu
 RUN pip install --upgrade pip \
     && if [ -n "$PIP_INDEX_URL" ]; then pip config set global.index-url "$PIP_INDEX_URL"; fi \
+    && TORCH_INDEX="${TORCH_INDEX:-$TORCH_CPU_INDEX}" \
+    && echo "torch index: $TORCH_INDEX ($(uname -m))" \
     && pip install --index-url "$TORCH_INDEX" \
         ${PIP_INDEX_URL:+--extra-index-url "$PIP_INDEX_URL"} torch==2.14.0 \
     && pip install -r /tmp/requirements.txt

@@ -36,3 +36,7 @@ sensory:
   # PLACEHOLDER, like the other sensory gains.
   mechanosensory_gain: 1.0
   johnstons_organ_gain: 0.95
+  # Very dry air: the sensillum lymph the olfactory receptor neurons sit in
+  # does not tolerate desiccation well, and there is less water to carry
+  # volatiles. PLACEHOLDER, like the other sensory gains.
+  olfactory_gain: 0.9

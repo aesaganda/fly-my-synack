@@ -47,3 +47,6 @@ sensory:
   # hygro/thermosensory sacculus and damps arista motion slightly.
   mechanosensory_gain: 1.05
   johnstons_organ_gain: 0.85
+  # Near-saturated air carries volatiles slightly better. The effect is
+  # compound-specific in reality; this is a PLACEHOLDER nudge, not a result.
+  olfactory_gain: 1.05

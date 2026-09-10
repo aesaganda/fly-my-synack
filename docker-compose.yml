@@ -33,6 +33,7 @@ services:
     command: >
       python3 run.py
       --env ${FLY_ENV:-dry_land}
+      --world ${FLY_WORLD:-flat}
       --steps ${STEPS:-50000}
       --connectome ${CONNECTOME:-neuprint}
       --neuron-subset ${NEURON_SUBSET:-motor}
@@ -66,6 +67,16 @@ services:
       - runs:/data/runs
     environment:
       FLY_ENV: ${FLY_ENV:-dry_land}
+      # `room` is the demo world - indoors, and the only one the fly can fly in.
+      # `kitchen` is the open worktop, `flat` is bare ground. Start-up only.
+      FLY_WORLD: ${FLY_WORLD:-room}
+      # Smaller than the native default on purpose: a container has no GPU, so
+      # MuJoCo rasterises in software at 60-100 ms a frame instead of ~10, and
+      # that time is taken from the simulation. See README "Speed".
+      FLY_CAMERA_RES: ${FLY_CAMERA_RES:-264x352}
+      # Physics steps per control update. 20 buys real time; 1 is the model the
+      # README's kinematics were measured on.
+      FLY_CONTROL_EVERY: ${FLY_CONTROL_EVERY:-30}
       FLY_CONNECTOME: ${CONNECTOME:-synthetic}
       FLY_SUBSET: ${NEURON_SUBSET:-motor}
       FLY_CONNECTOME_DIR: /data/connectome

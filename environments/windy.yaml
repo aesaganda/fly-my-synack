@@ -46,3 +46,8 @@ sensory:
   # is the input most plausibly boosted here.
   mechanosensory_gain: 1.1
   johnstons_organ_gain: 1.5
+  # The plume model is a still-air Gaussian. Wind does not just move it, it
+  # shreds it into filaments, so a smooth spatial gradient stops being a
+  # description of anything. Rather than pretend otherwise, the gain is cut:
+  # the fly gets a weak, unreliable cue and has to search. PLACEHOLDER.
+  olfactory_gain: 0.45

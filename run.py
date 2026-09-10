@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+from body.sim import DEFAULT_CONTROL_EVERY, DEFAULT_TIMESTEP
+from body.world import DEFAULT_WORLD, WORLDS
 from brain.subset import DEFAULT_SUBSET, SUBSETS
 from env.loader import list_presets, load_preset
 
@@ -24,10 +26,32 @@ CHECKPOINT_DIR = Path(os.environ.get("FLY_CHECKPOINT_DIR", "/data/checkpoints"))
 
 
 def _device(gpu: str | None) -> str:
+    """Resolve --gpu to a torch device string.
+
+    `mps` is Apple's Metal backend. It is accepted but it is NOT a speed-up for
+    the default `motor` subset - measured on an M3 Pro, one LIF step costs about
+    90 us on CPU against 294 us on MPS, because 2,129 neurons is far too small
+    to pay back Metal's per-kernel launch cost and the step is fourteen
+    elementwise operations against one matrix multiply. It wins on the big
+    subsets, where the matrix multiply dominates:
+
+        neurons   LIF step CPU   LIF step MPS
+          2,129          90 us         294 us     <- --neuron-subset motor
+         20,000       1,047 us         467 us     <- --neuron-subset vnc
+         60,000       3,986 us         820 us
+
+    So: CPU for the default, `--gpu mps` from roughly 20k neurons up.
+    """
     if gpu in (None, "", "cpu", "-1"):
         return "cpu"
     import torch
 
+    if str(gpu).lower() == "mps":
+        if not torch.backends.mps.is_available():
+            print("warning: --gpu mps requested but Metal is not available; using CPU",
+                  file=sys.stderr)
+            return "cpu"
+        return "mps"
     if not torch.cuda.is_available():
         print(f"warning: --gpu {gpu} requested but no CUDA device is visible; using CPU",
               file=sys.stderr)
@@ -56,6 +80,9 @@ def _new_session(args, preset: str, render: bool = False):
         connectome_dir=args.connectome_dir,
         checkpoint=args.checkpoint,
         synthetic_size=args.synthetic_size,
+        world=args.world,
+        timestep=args.timestep,
+        control_every=args.control_every,
     )
 
 
@@ -70,6 +97,8 @@ def cmd_run(args) -> int:
     summary["wall_seconds"] = round(time.time() - t0, 2)
     summary["steps_per_second"] = round(args.steps / max(time.time() - t0, 1e-9))
     summary["env"] = args.env
+    summary["world"] = args.world
+    summary["control_every"] = args.control_every
     summary["connectome"] = f"{sess.tables.source}:{sess.tables.dataset}"
 
     print(json.dumps(summary, indent=2))
@@ -167,8 +196,22 @@ def build_parser() -> argparse.ArgumentParser:
         prog="run.py", description="Connectome-driven fly simulation across environment presets."
     )
     p.add_argument("--env", default="dry_land", help="environment preset name")
+    # Deliberately defaults to `flat`: every kinematics number in the README was
+    # measured on bare ground, and the kitchen's odour sources steer the fly, so
+    # switching worlds would silently invalidate them. The web UI defaults the
+    # other way - see FLY_WORLD in web/app.py.
+    p.add_argument("--world", default=DEFAULT_WORLD, choices=sorted(WORLDS),
+                   help="scenery: bare ground, or a kitchen with things that smell")
     p.add_argument("--steps", type=int, default=5000, help="physics steps (timestep 1e-4 s)")
-    p.add_argument("--gpu", default=None, help="CUDA device id, or omit for CPU")
+    p.add_argument("--timestep", type=float, default=DEFAULT_TIMESTEP,
+                   help="physics timestep in seconds. RAISING THIS BREAKS THE GAIT: at 2e-4 "
+                        "walking speed changes threefold and at 3e-4 the fly falls over.")
+    p.add_argument("--control-every", type=int, default=DEFAULT_CONTROL_EVERY,
+                   help="physics steps per control update. 1 is the documented model; 20-30 "
+                        "runs at real time with the gait intact. See README 'Real time'.")
+    p.add_argument("--gpu", default=None,
+                   help="CUDA device id, or 'mps' for Apple Metal, or omit for CPU. "
+                        "CPU is FASTER for the default neuron subset - see _device()")
     p.add_argument("--render", choices=("on", "off"), default="off")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--list-envs", action="store_true", help="print available presets and exit")

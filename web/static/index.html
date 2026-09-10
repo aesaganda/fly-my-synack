@@ -2,7 +2,8 @@
 <meta charset="utf-8">
 <title>Connectome fly &mdash; live</title>
 <style>
-  :root { --bg:#12141a; --fg:#e6e8ee; --dim:#8b93a7; --line:#272b36; --accent:#6fd08c; }
+  :root { --bg:#0d1014; --panel:#12161c; --fg:#e6e8ee; --dim:#8b93a7; --line:#242a33;
+          --accent:#4ade80; --accent-dim:#1d5c36; --warn:#d8a657; }
   * { box-sizing: border-box; }
   body { margin:0; background:var(--bg); color:var(--fg);
          font:14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
@@ -10,11 +11,13 @@
            align-items:baseline; gap:14px; flex-wrap:wrap; }
   h1 { font-size:15px; margin:0; font-weight:600; letter-spacing:.02em; }
   .note { color:var(--dim); font-size:12px; }
-  main { display:grid; grid-template-columns: minmax(320px,1fr) 300px; gap:18px; padding:18px; }
-  @media (max-width:760px) { main { grid-template-columns:1fr; } }
+  main { display:grid; grid-template-columns: minmax(320px,1fr) 300px; gap:18px; padding:18px;
+         align-items:start; }
+  @media (max-width:860px) { main { grid-template-columns:1fr; } }
+  .stack { display:flex; flex-direction:column; gap:14px; }
   #view { width:100%; background:#000; border:1px solid var(--line); border-radius:6px;
           aspect-ratio:4/3; object-fit:contain; }
-  section { border:1px solid var(--line); border-radius:6px; padding:12px; }
+  section { border:1px solid var(--line); border-radius:6px; padding:12px; background:var(--panel); }
   h2 { font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:var(--dim);
        margin:0 0 10px; font-weight:600; }
   button { font:inherit; background:#1c2029; color:var(--fg); border:1px solid var(--line);
@@ -25,20 +28,46 @@
   dl { display:grid; grid-template-columns:auto 1fr; gap:4px 10px; margin:0; }
   dt { color:var(--dim); } dd { margin:0; text-align:right; font-variant-numeric:tabular-nums; }
   input[type=range] { width:100%; }
-  .warn { color:#d8a657; font-size:12px; margin-top:10px; }
+  .warn { color:var(--warn); font-size:12px; margin-top:10px; }
   #status { color:var(--dim); font-size:12px; }
+
+  /* ---- brain activity ---- */
+  #rasterWrap { display:grid; grid-template-columns:38px 1fr; gap:6px; align-items:stretch; }
+  #rasterLabels { position:relative; font-size:10px; color:var(--dim); }
+  #rasterLabels span { position:absolute; right:0; transform:translateY(-50%); white-space:nowrap; }
+  #raster { width:100%; height:200px; display:block; background:#05100a;
+            border:1px solid var(--line); border-radius:4px; image-rendering:pixelated; }
+  .bars { display:grid; grid-template-columns:auto 1fr auto; gap:3px 8px; align-items:center;
+          font-size:11px; }
+  .bars .name { color:var(--dim); }
+  .bars .track { background:#171c22; border-radius:2px; height:9px; overflow:hidden; }
+  .bars .fill { background:var(--accent); height:100%; width:0; transition:width .2s linear; }
+  .bars .val { font-variant-numeric:tabular-nums; color:var(--dim); }
 </style>
 
 <header>
   <h1>Connectome-driven fly</h1>
   <span class="note">CPG gait steered by decoded DN/MN population rates &mdash; not emergent locomotion</span>
   <span id="status">connecting&hellip;</span>
+  <span class="note" id="pace"></span>
 </header>
 
 <main>
-  <div><img id="view" alt="simulation view"></div>
+  <div class="stack">
+    <img id="view" alt="simulation view">
 
-  <div style="display:flex; flex-direction:column; gap:14px;">
+    <section>
+      <h2>Brain activity <span class="note" id="brain-sub"></span></h2>
+      <div id="rasterWrap">
+        <div id="rasterLabels"></div>
+        <canvas id="raster"></canvas>
+      </div>
+      <p class="warn">Spike counts per 5 ms bin, sampled from the populations the decoder
+        reads. Time runs left to right; the right edge is now.</p>
+    </section>
+  </div>
+
+  <div class="stack">
     <section>
       <h2>Environment</h2>
       <div class="row" id="presets"></div>
@@ -53,16 +82,20 @@
     </section>
 
     <section>
-      <h2>DN override <span class="note">(debug)</span></h2>
-      <label>forward <span id="fwdv">0.00</span>
-        <input type="range" id="fwd" min="-1" max="1" step="0.05" value="0"></label>
-      <label>turn <span id="turnv">0.00</span>
-        <input type="range" id="turn" min="-1" max="1" step="0.05" value="0"></label>
-      <div class="row" style="margin-top:8px">
-        <button id="stop" aria-pressed="false">Stop</button>
-        <button id="clear">Clear</button>
-      </div>
-      <p class="warn">Biases the decoded drive directly. A debug lever, not a biological mechanism.</p>
+      <h2>Population rates (Hz)</h2>
+      <div class="bars" id="rates"></div>
+    </section>
+
+    <section>
+      <h2>Exploring</h2>
+      <dl>
+        <dt>world</dt><dd id="m-world">&mdash;</dd>
+        <dt>odour</dt><dd id="m-odour">&mdash;</dd>
+        <dt>L/R difference</dt><dd id="m-odiff">&mdash;</dd>
+        <dt>nearest smell</dt><dd id="m-target">&mdash;</dd>
+      </dl>
+      <p class="warn">Bilateral olfaction into DN_L / DN_R, with receptor adaptation.
+        Not a model of the antennal lobe, and not consciousness.</p>
     </section>
 
     <section>
@@ -78,6 +111,19 @@
         <dt>mean rate (Hz)</dt><dd id="m-rate">&mdash;</dd>
         <dt>neurons</dt><dd id="m-neurons">&mdash;</dd>
       </dl>
+    </section>
+
+    <section>
+      <h2>DN override <span class="note">(debug)</span></h2>
+      <label>forward <span id="fwdv">0.00</span>
+        <input type="range" id="fwd" min="-1" max="1" step="0.05" value="0"></label>
+      <label>turn <span id="turnv">0.00</span>
+        <input type="range" id="turn" min="-1" max="1" step="0.05" value="0"></label>
+      <div class="row" style="margin-top:8px">
+        <button id="stop" aria-pressed="false">Stop</button>
+        <button id="clear">Clear</button>
+      </div>
+      <p class="warn">Biases the decoded drive directly. A debug lever, not a biological mechanism.</p>
     </section>
   </div>
 </main>
@@ -114,6 +160,8 @@ function connectControl() {
     const m = JSON.parse(e.data);
     if (m.presets) renderPresets(m.presets, m.preset);
     if (m.metrics) renderMetrics(m.metrics);
+    if (m.brain) renderBrain(m.brain);
+    if (m.pace) renderPace(m.pace);
   };
 }
 
@@ -138,18 +186,131 @@ function renderPresets(names, current) {
   box.dataset.built = "1";
 }
 
+// Honest playback speed. The simulation runs far slower than real time, and
+// frames are paced on wall time rather than simulated time, so what you are
+// watching is slow motion by a factor worth stating.
+function renderPace(p) {
+  const el = document.getElementById("pace");
+  if (!p.sim_speed) { el.textContent = ""; return; }
+  // Always the actual factor. "1x slow motion" is a nonsense reading, and
+  // rounding a number the whole point of which is honesty is worse than showing
+  // two decimals.
+  el.textContent = `${p.fps.toFixed(0)} fps · ${p.sim_speed.toFixed(2)}\u00d7 real time`;
+}
+
 const fmt = (v, d = 3) => (v === null || v === undefined) ? "—" : Number(v).toFixed(d);
+const text = (id, v) => { document.getElementById(id).textContent = v; };
+
 function renderMetrics(m) {
-  document.getElementById("m-step").textContent = m.step ?? "—";
-  document.getElementById("m-preset").textContent = m.preset ?? "—";
-  document.getElementById("m-mode").textContent = m.mode ?? "—";
-  document.getElementById("m-speed").textContent = fmt(m.speed_mm_s, 2);
-  document.getElementById("m-gait").textContent = fmt(m.gait_regularity);
-  document.getElementById("m-fwd").textContent = fmt(m.forward);
-  document.getElementById("m-turn").textContent = fmt(m.turn);
-  document.getElementById("m-rate").textContent = fmt(m.mean_rate_hz, 1);
-  document.getElementById("m-neurons").textContent = m.n_neurons ?? "—";
-  document.getElementById("m-preset").textContent = m.preset ?? "—";
+  text("m-step", m.step ?? "—");
+  text("m-preset", m.preset ?? "—");
+  text("m-world", m.world ?? "—");
+  text("m-mode", m.mode ?? "—");
+  text("m-speed", fmt(m.speed_mm_s, 2));
+  text("m-gait", fmt(m.gait_regularity));
+  text("m-fwd", fmt(m.forward));
+  text("m-turn", fmt(m.turn));
+  text("m-rate", fmt(m.mean_rate_hz, 1));
+  text("m-neurons", m.n_neurons ?? "—");
+  text("m-odour", fmt(m.odour, 3));
+  text("m-odiff", fmt(m.odour_lr_diff, 5));
+  text("m-target", m.nearest_source
+    ? `${m.nearest_source.name} ${m.nearest_source.distance_mm.toFixed(1)} mm`
+    : "—");
+}
+
+// ---- brain activity ------------------------------------------------------
+// The raster arrives as base64 uint8 spike counts, one byte per (neuron, 5 ms
+// bin), row-major, oldest column first. It is painted at its native size into
+// an offscreen canvas and scaled up with smoothing off, so a 160-column window
+// stays crisp instead of turning into green mush.
+const rasterCanvas = document.getElementById("raster");
+const rasterCtx = rasterCanvas.getContext("2d");
+const offscreen = document.createElement("canvas");
+const offCtx = offscreen.getContext("2d");
+let labelsBuilt = "";
+
+function renderBrain(b) {
+  document.getElementById("brain-sub").textContent =
+    `${b.rows} neurons · ${b.bin_ms.toFixed(1)} ms bins`;
+  buildLabels(b);
+  buildRateBars(b);
+
+  const raw = atob(b.raster);
+  if (offscreen.width !== b.cols || offscreen.height !== b.rows) {
+    offscreen.width = b.cols; offscreen.height = b.rows;
+  }
+  const img = offCtx.createImageData(b.cols, b.rows);
+  const px = img.data;
+  for (let i = 0; i < b.rows * b.cols; i++) {
+    const v = raw.charCodeAt(i);
+    const o = i * 4;
+    if (v === 0) { px[o] = 5; px[o+1] = 16; px[o+2] = 10; px[o+3] = 255; continue; }
+    const k = Math.min(1, 0.45 + 0.28 * v);
+    px[o] = 40 * k; px[o+1] = 255 * k; px[o+2] = 110 * k; px[o+3] = 255;
+  }
+  offCtx.putImageData(img, 0, 0);
+
+  const w = rasterCanvas.clientWidth, h = rasterCanvas.clientHeight;
+  if (rasterCanvas.width !== w || rasterCanvas.height !== h) {
+    rasterCanvas.width = w; rasterCanvas.height = h;
+  }
+  rasterCtx.imageSmoothingEnabled = false;
+  rasterCtx.drawImage(offscreen, 0, 0, w, h);
+
+  // Group separators, so DN_L / DN_R / the six leg pools stay distinguishable.
+  rasterCtx.strokeStyle = "rgba(140,160,180,0.35)";
+  rasterCtx.lineWidth = 1;
+  let row = 0;
+  for (const g of b.groups) {
+    row += g.rows;
+    if (row >= b.rows) break;
+    const y = Math.round(row / b.rows * h) + 0.5;
+    rasterCtx.beginPath(); rasterCtx.moveTo(0, y); rasterCtx.lineTo(w, y); rasterCtx.stroke();
+  }
+}
+
+function buildLabels(b) {
+  const key = b.groups.map(g => `${g.name}:${g.rows}`).join(",");
+  if (labelsBuilt === key) return;
+  labelsBuilt = key;
+  const box = document.getElementById("rasterLabels");
+  box.innerHTML = "";
+  let row = 0;
+  for (const g of b.groups) {
+    const mid = (row + g.rows / 2) / b.rows;
+    row += g.rows;
+    const el = document.createElement("span");
+    el.textContent = g.name;
+    el.style.top = `${mid * 100}%`;
+    box.appendChild(el);
+  }
+}
+
+// Bars are scaled to the largest rate seen so far rather than a fixed ceiling:
+// the absolute rates depend on the connectome subset and the preset's Q10, so a
+// hard-coded maximum would either clip or sit near zero.
+let rateCeiling = 20;
+function buildRateBars(b) {
+  const box = document.getElementById("rates");
+  const names = Object.keys(b.rates_hz);
+  if (box.dataset.built !== names.join(",")) {
+    box.innerHTML = "";
+    for (const n of names) {
+      const name = document.createElement("div"); name.className = "name"; name.textContent = n;
+      const track = document.createElement("div"); track.className = "track";
+      const fill = document.createElement("div"); fill.className = "fill"; fill.id = `bar-${n}`;
+      track.appendChild(fill);
+      const val = document.createElement("div"); val.className = "val"; val.id = `barv-${n}`;
+      box.append(name, track, val);
+    }
+    box.dataset.built = names.join(",");
+  }
+  rateCeiling = Math.max(rateCeiling, ...Object.values(b.rates_hz));
+  for (const [n, v] of Object.entries(b.rates_hz)) {
+    document.getElementById(`bar-${n}`).style.width = `${(v / rateCeiling) * 100}%`;
+    document.getElementById(`barv-${n}`).textContent = v.toFixed(1);
+  }
 }
 
 document.getElementById("pause").onclick = (e) => {
