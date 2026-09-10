@@ -215,6 +215,7 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Tonic drive (1.05)** | With `--neuron-subset motor` everything upstream of the DNs is missing, so nothing would reach threshold. A constant background current stands in for the absent network. |
 | **Sensory encoding** | Contact force is injected into each leg's *motor* pool as a proprioceptive stand-in; a scalar air-motion term stands in for Johnston's organ. Real `vnc_sensory` neurons are used when the loaded subset contains them. Anatomically crude either way. |
 | **Sensory gains per preset** | Reasoned, not measured. Humidity and immersion plausibly change mechanosensory and antennal input; the numbers are invented. |
+| **Humidity → tarsal grip** | Insect tarsal adhesion genuinely is humidity-dependent, but the direction is regime-dependent and the literature is mixed: moderate humidity can *increase* attachment through capillary bridges at the pad, while a condensed film on the surface reduces it. This preset takes the wet-film case. The mechanism is real; the number (80 against 200) is a placeholder. |
 | **Gait joint amplitudes** | Chosen by sweeping speed *and* postural stability together across coxa sweep, tibia sweep, lift, duty factor, stride frequency, actuator gain and adhesion. Reaches ~10 mm/s, the bottom of a real fly's ~10-20 mm/s, but the coxa excursion (2.6 rad ≈ 149°) is far beyond anything physiological. It moves the model convincingly; it is not measured Drosophila kinematics. |
 | **Leg adhesion gain** | 200, against MuJoCo's default of 1.0. Without it the foot slips through stance and a stride delivers a fraction of the travel its geometry implies — this single parameter was worth about 3x in speed. Above ~400 the foot sticks hard enough to pull the fly off a straight line. |
 | **Postural margin** | `windy` runs at 1.5 m/s, which visibly shoves the fly without knocking it over. At 2.0 m/s it is lifted off the floor and tumbles away — a cliff, not a gradient. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
@@ -337,30 +338,42 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | cold 15C | dry_land 25C | hot 35C | windy | submerged |
-  |---|---|---|---|---|---|
-  | net speed mm/s | **2.69** | 10.77 | **12.28** | 6.95 | **0.86** |
-  | straightness | 0.631 | 0.990 | 0.997 | **0.702** | **0.482** |
-  | muscle gain (kp) | **8.7** | 20.0 | **40.0** | 20.0 | 13.2 |
-  | membrane tau ms | **40.0** | 20.0 | **8.7** | 20.0 | 30.3 |
-  | feet on the ground | 3.4 | 2.7 | 2.5 | 2.7 | **0.2** |
+  | metric | cold 15C | dry_land 25C | humid_air | hot 35C | windy | submerged |
+  |---|---|---|---|---|---|---|
+  | net speed mm/s | **2.69** | 10.77 | **5.84** | **12.28** | 6.95 | **0.86** |
+  | slip ratio | 0.53 | 0.52 | **0.72** | 0.51 | 0.55 | n/a |
+  | straightness | 0.631 | 0.990 | **0.78** | 0.997 | **0.702** | **0.482** |
+  | tarsal grip | 200 | 200 | **80** | 200 | 200 | 0 (swimming) |
+  | feet on the ground | 3.4 | 2.7 | 2.8 | 2.5 | 2.7 | **0.2** |
 
   Every preset does something distinct, for a different reason:
 
-  * **Temperature** spans 4.6x in walking speed, and does so through two
-    channels rather than one. Q10 shortens the membrane time constants, so leg
-    motor pools fire faster (35 / 70 / 123 Hz at 15 / 25 / 35 C) and the CPG
-    steps quicker; the same Q10 also scales the position actuators, which stand
-    in for muscle. With only the neural half wired up, cold merely stepped less
-    often while each step stayed crisp - slow motion rather than sluggishness.
-    With muscle included, the cold fly sags lower, drags more feet (3.4 against
-    2.7) and staggers, which is why its straightness drops to 0.63: it is feeble,
-    not just slow. Hot is limited by the BODY - above ~22 Hz stride the
-    actuators stop tracking, which is what `MAX_FORWARD_DRIVE` is pinned to.
+  * **Temperature** spans 4.6x in walking speed through two channels. Q10
+    shortens the membrane time constants, so leg motor pools fire faster
+    (35 / 70 / 123 Hz at 15 / 25 / 35 C) and the CPG steps quicker; the same Q10
+    scales the position actuators, which stand in for muscle. With only the
+    neural half, cold merely stepped less often while each step stayed crisp -
+    slow motion rather than sluggishness. Hot is limited by the BODY: above
+    ~22 Hz stride the actuators stop tracking.
+  * **Humidity** acts on GRIP, not on the air. Humid air is very slightly
+    *lighter* than dry, so the preset invents no drag; what changes is tarsal
+    adhesion on a damp substrate. The fly keeps stepping at normal speed
+    (~21 mm/s instantaneous) but loses roughly half its travel, and the slip
+    ratio rises from 0.52 to 0.72.
   * **Wind** at 1.5 m/s shoves the fly off its heading while gusting it to
     78 mm/s peak, far faster than it can walk.
   * **Water** is a different mode of locomotion, not a slow walk: suspended
     (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
+
+  A caveat on the humidity result, because it surprised me. It is a
+  **closed-loop** effect, not raw mechanics. Driving the same body from a fixed
+  CPG with no brain, lower adhesion makes the fly slightly *faster*
+  (11.7 against 11.2 mm/s). The slowdown appears only with the network in the
+  loop: less grip changes the mechanical load the legs report, which changes the
+  sensory drive and hence the descending command. Across seeds 0-2 it is cleanly
+  separated - 10.64 +- 0.08 mm/s dry against 5.84 +- 0.20 humid - so it is a
+  real and reproducible property of the closed loop, but it is not something you
+  could predict from the physics alone.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

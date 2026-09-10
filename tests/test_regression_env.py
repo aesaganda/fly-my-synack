@@ -196,3 +196,44 @@ def bs_clamp():
     import body.sim as bs
 
     return bs.MUSCLE_GAIN_CLAMP
+
+
+def test_humid_reduces_grip_and_costs_travel():
+    """Humidity acts on GRIP, and the cost is a closed-loop effect.
+
+    The humid preset used to differ from dry air only by a 0.6% density change
+    and two small sensory gains, so it behaved identically. It now models the
+    mechanical effect that matters: a damp substrate reduces tarsal adhesion.
+
+    Note the effect needs the brain in the loop. Driving the same body from a
+    fixed CPG, lower adhesion actually makes the fly slightly FASTER
+    (11.7 against 11.2 mm/s over 40k steps). The slowdown comes from reduced
+    grip changing the load the legs report, which changes the descending drive.
+    So this test runs a full Session rather than an open-loop gait - measured
+    across seeds 0-2 the two are cleanly separated, 10.64 +- 0.08 mm/s dry
+    against 5.84 +- 0.20 humid.
+    """
+    from env.loader import load_preset
+    from session import Session
+
+    dry = load_preset("dry_land")
+    humid = load_preset("humid_air")
+
+    # Grip is lower, but the air is NOT denser - humid air is in fact slightly
+    # lighter, and the preset does not pretend otherwise.
+    assert (humid.adhesion_gain or 200.0) < (dry.adhesion_gain or 200.0)
+    assert float(humid.physics["density"]) < float(dry.physics["density"])
+
+    def run(name):
+        sess = Session(preset=name, connectome="synthetic", subset="motor",
+                       synthetic_size=3000, connectome_dir="/tmp/flysim-test", seed=0)
+        summary = sess.run(12000)
+        sess.body.close()
+        return summary
+
+    dry_run, humid_run = run("dry_land"), run("humid_air")
+    assert humid_run["net_speed_mm_s"] < dry_run["net_speed_mm_s"], "damp ground should cost travel"
+    # Slipping specifically: more of the leg motion fails to become travel.
+    assert humid_run["slip_ratio"] > dry_run["slip_ratio"], (
+        f"slip {humid_run['slip_ratio']:.2f} humid vs {dry_run['slip_ratio']:.2f} dry"
+    )

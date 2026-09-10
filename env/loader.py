@@ -59,6 +59,16 @@ class EnvPreset:
         return str(self.physics.get("locomotion", "walk"))
 
     @property
+    def adhesion_gain(self) -> float | None:
+        """Tarsal grip, or None for the body's default.
+
+        Insect tarsal adhesion is genuinely humidity-dependent, so this is a
+        per-environment property rather than a fixed body constant.
+        """
+        value = self.physics.get("adhesion_gain")
+        return float(value) if value is not None else None
+
+    @property
     def stroke_freq_hz(self) -> float | None:
         """Base limb-cycle frequency, or None to use the body's default.
 

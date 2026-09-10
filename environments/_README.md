@@ -27,6 +27,16 @@ rather than silently simulating a fly in treacle.
    scales the result by density/viscosity, so a wind preset with zero density
    is a no-op. `tests/test_env_loader.py` asserts this.
 
+## Optional physics fields
+
+Beyond the required ones, a preset may set:
+
+| field | default | meaning |
+|---|---|---|
+| `adhesion_gain` | 200 | tarsal grip. Lower = the fly slips on a damp surface. |
+| `locomotion` | `walk` | `walk` (tripod gait, adhesion on) or `swim` (synchronous rowing, adhesion off). |
+| `stroke_freq_hz` | body default (18) | limb cycle frequency. Swimming wants a slower one. |
+
 ## Placeholders
 
 `q10`, `tau_clamp_ms`, and everything under `sensory:` are **not** sourced

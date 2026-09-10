@@ -188,6 +188,11 @@ class FlyBody:
         # the fly's own mujoco_globals.yaml.
         self.swimming = False
         self._kp_ref = actuator_gain
+        self._adhesion_ref = adhesion_gain
+        self._adhesion_actuators = [
+            i for i in range(self.sim.mj_model.nu)
+            if self.sim.mj_model.actuator_biastype[i] != mujoco_bias_affine()
+        ]
         self._position_actuators = [
             i for i in range(self.sim.mj_model.nu)
             if self.sim.mj_model.actuator_biastype[i] == mujoco_bias_affine()
@@ -220,7 +225,16 @@ class FlyBody:
         apply_physics(self.sim.mj_model, preset)
         self._wind = np.asarray([float(w) for w in preset.physics["wind"]])
         self.swimming = preset.locomotion == "swim"
+        self._apply_adhesion(preset)
         self._apply_muscle_gain(preset)
+
+    def _apply_adhesion(self, preset: EnvPreset) -> None:
+        """Set tarsal grip from the preset (see EnvPreset.adhesion_gain)."""
+        gain = preset.adhesion_gain
+        self.adhesion_gain = self._adhesion_ref if gain is None else float(gain)
+        idx = self._adhesion_actuators
+        if idx:
+            self.sim.mj_model.actuator_gainprm[idx, 0] = self.adhesion_gain
 
     def _apply_muscle_gain(self, preset: EnvPreset) -> None:
         """Scale the position actuators' gain with temperature (see above)."""

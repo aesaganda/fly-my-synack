@@ -64,6 +64,13 @@ class RunMetrics:
             "steps": self.steps,
             "net_speed_mm_s": float(displacement / elapsed) if elapsed else 0.0,
             "mean_speed_mm_s": float(speeds.mean()),
+            # How much of the leg motion fails to become travel. High values
+            # mean the fly is stepping briskly and going nowhere - slipping -
+            # which is what low tarsal grip looks like.
+            "slip_ratio": (
+                float(1.0 - (displacement / elapsed) / speeds.mean())
+                if elapsed and speeds.mean() > 1e-9 else 0.0
+            ),
             "peak_speed_mm_s": float(speeds.max()),
             "net_displacement_mm": displacement,
             # 1.0 = perfectly straight; lower = more curved/wandering path.
