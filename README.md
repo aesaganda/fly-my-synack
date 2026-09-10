@@ -388,6 +388,11 @@ explicit about what that means:
 - The web UI: WebSocket frame streaming, preset switching, DN override, and
   pause/resume/reset all confirmed against a running server.
 - `Dockerfile.offline` builds and its tests pass inside the container.
+- `Dockerfile` (the non-offline one) builds and runs on an unrestricted
+  network: `docker build .` completes, and the built image fetched a real
+  connectome from neuPrint during the data-fetch stage (2,129 neurons, 104,411
+  edges) and ran `run.py --list-envs` correctly. Not re-run under `pytest`
+  inside this container specifically.
 
 ### A failure worth recording
 
@@ -417,10 +422,6 @@ model capsizes.
 - **The Feather path.** `storage.googleapis.com` is blocked on the development
   network, so the bulk files were never downloaded and their column names were
   never confirmed. Run the `--schema` command above before trusting it.
-- **`Dockerfile` (the non-offline one).** `apt` could not reach Debian mirrors
-  from containers on this network, so the standard build was never completed
-  here. It is the conventional recipe and should work on an unrestricted
-  network, but it is unproven.
 
 ---
 
