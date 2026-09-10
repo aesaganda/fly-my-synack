@@ -330,3 +330,44 @@ def test_hot_is_frantic_not_fast():
     assert hot["slip_ratio"] > mid["slip_ratio"], (
         f"slip {hot['slip_ratio']:.2f} hot vs {mid['slip_ratio']:.2f} temperate"
     )
+
+
+def test_cold_drags_rather_than_walking():
+    """10 C is cold enough that the fly stops running a tripod gait.
+
+    Both Q10 channels bite at once - membrane time constants stretch to ~70 ms
+    and muscle gain falls to ~5.7 - so the fly cannot hold itself up properly.
+    The signature is postural, not just slow: a walking fly keeps about three
+    feet down at any moment, a cold-stunned one sags and drags four or more.
+
+    This is the mirror of the hot preset. Both are slow, but cold has LOW leg
+    speed (the legs barely move) while hot has the highest of any preset (the
+    legs move faster than they can usefully track), so net speed alone would
+    make the two look alike.
+    """
+    from env.loader import load_preset
+
+    cold = load_preset("cold")
+    mid = load_preset("temperate")
+    assert cold.temperature_c < 12.0, "15 C is not cold enough to impair a fly"
+
+    # The Q10 must not be truncated by the guard rail - the upper tau bound is
+    # not stability-critical and previously clipped this preset by 13%.
+    wanted = 20.0 * (float(cold.neural["q10"]) ** ((25.0 - cold.temperature_c) / 10.0))
+    assert cold.scaled_taus({"tau_m_ms": 20.0})["tau_m_ms"] == pytest.approx(wanted), (
+        "tau_clamp_ms is truncating the cold preset's Q10"
+    )
+
+    def feet_down(preset):
+        body = FlyBody(preset)
+        cpg = TripodCPG(dt_s=body.timestep, seed=0)
+        counts = []
+        for i in range(6000):
+            phase, amplitude = cpg.step(0.4, 0.0, np.ones(6))
+            obs = body.step(phase, amplitude)
+            if i > 2000:
+                counts.append(int(obs["contact_found"].sum()))
+        body.close()
+        return float(np.mean(counts))
+
+    assert feet_down(cold) > feet_down(mid), "a cold fly should drag more feet than it lifts"

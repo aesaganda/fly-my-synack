@@ -29,7 +29,7 @@ physics:
 neural:
   temperature_c: 25.0
   q10: 2.3               # PLACEHOLDER, not a sourced Drosophila constant.
-  tau_clamp_ms: [2.0, 40.0]   # PLACEHOLDER guard rails.
+  tau_clamp_ms: [2.0, 120.0]   # PLACEHOLDER guard rails.
 
 sensory:
   # Slightly reduced antennal drive: very dry air carries less to sense.

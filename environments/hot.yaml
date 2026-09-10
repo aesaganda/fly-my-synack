@@ -22,7 +22,7 @@ neural:
   # can usefully follow. See MAX_FORWARD_DRIVE in bridge/decode.py.
   temperature_c: 35.0
   q10: 2.3               # PLACEHOLDER
-  tau_clamp_ms: [2.0, 40.0]
+  tau_clamp_ms: [2.0, 120.0]
 
 sensory:
   mechanosensory_gain: 1.0

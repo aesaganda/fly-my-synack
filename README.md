@@ -98,7 +98,7 @@ flail.
 | `humid_air` | near-saturated air | 25 °C | water film, weakest grip |
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
 | `hot` | dry air | 35 °C | past the thermal optimum — frantic |
-| `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
+| `cold` | dry air | 10 °C | near chill coma — sags and drags |
 | `windy` | dry air, gusty 0→1.9 m/s | 25 °C | buffeted off course |
 
 ```bash
@@ -340,39 +340,34 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | cold 15C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
+  | metric | cold 10C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
   |---|---|---|---|---|---|---|---|
-  | net speed mm/s | **2.69** | 7.68 | **10.75** | 5.20 | **5.83** | 6.01 | **0.86** |
-  | leg speed mm/s | 9.4 | 21.4 | 22.5 | 20.7 | **29.0** | 24.6 | 3.1 |
-  | slip ratio | 0.71 | 0.63 | **0.52** | 0.75 | **0.80** | 0.72 | n/a |
-  | straightness | 0.631 | 0.817 | **0.989** | 0.689 | **0.435** | **0.489** | **0.482** |
+  | net speed mm/s | **1.66** | 7.68 | **10.75** | 5.20 | 5.83 | 6.01 | **0.86** |
+  | leg speed mm/s | **4.7** | 21.4 | 22.5 | 20.7 | **29.0** | 24.6 | 3.1 |
+  | feet on the ground | **4.05** | 2.8 | 2.73 | 2.8 | **2.23** | 2.7 | **0.2** |
+  | slip ratio | 0.65 | 0.63 | **0.52** | 0.75 | **0.80** | 0.72 | n/a |
+  | straightness | 0.882 | 0.817 | **0.989** | 0.689 | **0.435** | **0.489** | **0.482** |
 
-  Every preset does something distinct, for a different reason - and two of the
-  axes turn out to be non-monotonic, so `temperate` is the best case on both:
+  Two of the axes are non-monotonic, so `temperate` is the best case on both:
 
-  * **Temperature peaks and then falls.** Ectotherm locomotor performance rises
-    to an optimum around 25-30 C and declines toward the critical thermal
-    maximum, and the two ends fail in opposite ways. **Cold** is sluggish: slow
-    membrane kinetics *and* weak muscle, so the legs barely move (9.4 mm/s) and
-    the fly sags and drags. **Hot** is frantic: Q10 drives the leg pools to
-    ~123 Hz against ~70 at 25 C, the network commands a ~29 Hz stride the
-    actuators cannot track, and the result is the most active preset by leg
-    speed (29.0) and one of the least effective by travel - 80% of the motion
-    is wasted and the path falls apart to 0.435. Fast nerves, failing muscle.
-  * **Humidity peaks and then falls** for a different reason: tarsal pads need
-    some moisture to form the capillary bridges that grip, so dry air weakens
-    them, while a condensed film at saturation makes them slip. 7.7 mm/s at
-    ~20% RH, 10.8 at ~60%, 5.2 at ~90%.
-  * **Wind** gusts rather than blowing steadily, because a steady wind cannot
-    buffet the fly - it can only bias its path or delete it (2.0 m/s capsizes it
-    permanently, 2.5 carries it away). Only slow gusts work: fast ones average
-    out and leave the fly *faster and straighter* than steady wind.
-  * **Water** is a different mode of locomotion, not a slow walk: suspended
-    (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
-
-  Note that cold and hot are both slow, but for opposite reasons, and the leg
-  speed column separates them: 9.4 mm/s cold against 29.0 hot. Net speed alone
-  would make them look alike.
+  * **Temperature peaks at 25 C and fails in OPPOSITE ways at the two ends.**
+    **Cold (10 C)** is near chill coma - *Drosophila* CTmin is roughly 4-8 C.
+    Both Q10 channels bite at once: membrane time constants stretch to ~70 ms
+    and muscle gain falls to 5.7, so the fly cannot hold itself up. It sags and
+    drags **4.05 feet** along the ground rather than running a three-point
+    tripod, with its legs barely moving (4.7 mm/s). **Hot (35 C)** is the
+    opposite failure: the nerve outruns the muscle. Leg pools fire at ~123 Hz,
+    the network commands a ~29 Hz stride the actuators cannot track, and the fly
+    thrashes - the highest leg speed of any preset (29.0), the FEWEST feet down
+    (2.23), 80% of the motion wasted and the path collapsing to 0.435.
+    Sluggish at one end, frantic at the other; net speed alone would confuse
+    them, which is why leg speed and feet-down are in the table.
+  * **Humidity peaks at ~60% RH** for an unrelated reason: tarsal pads need some
+    moisture to form the capillary bridges that grip, so dry air weakens them,
+    while a condensed film at saturation makes them slip.
+  * **Wind** gusts rather than blowing steadily - a steady wind can only bias
+    the path or delete it (2.0 m/s capsizes the fly, 2.5 carries it away).
+  * **Water** is a different mode of locomotion: suspended, rowing all six legs.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

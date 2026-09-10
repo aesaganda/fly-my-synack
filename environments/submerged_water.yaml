@@ -34,7 +34,7 @@ physics:
 neural:
   temperature_c: 20.0
   q10: 2.3               # PLACEHOLDER
-  tau_clamp_ms: [2.0, 40.0]
+  tau_clamp_ms: [2.0, 120.0]
 
 sensory:
   # PLACEHOLDER. Rationale: a ~1000x denser medium mechanically loads bristles

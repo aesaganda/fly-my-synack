@@ -40,7 +40,7 @@ physics:
 neural:
   temperature_c: 25.0
   q10: 2.3               # PLACEHOLDER
-  tau_clamp_ms: [2.0, 40.0]
+  tau_clamp_ms: [2.0, 120.0]
 
 sensory:
   # PLACEHOLDER. Rationale, not measurement: humidity loads the antennal
