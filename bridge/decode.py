@@ -37,13 +37,32 @@ _SUBCLASS_TO_POS = {"fl": "F", "ml": "M", "hl": "H"}
 REFERENCE_RATE_HZ = 10.0
 TURN_REFERENCE_HZ = 25.0
 
-# How far per-leg drive may deviate from the mean. This is a STABILITY limit,
-# not a modelling choice: at +/-0.8 the stride asymmetry between individual legs
-# rolls the fly onto its back within a few thousand steps (verified - with
-# per_leg_gain pinned to 1.0 the same run stays upright indefinitely). Keeping
-# the depth small preserves the connectome's per-leg influence without
-# capsizing the animal.
-PER_LEG_DEPTH = 0.25
+# How far per-leg drive may deviate from the mean.
+#
+# Originally a STABILITY limit: at +/-0.8 the stride asymmetry between legs
+# rolled the fly onto its back within a few thousand steps.
+#
+# It is also what makes the path curve. The per-leg rates carry a systematic
+# left-right bias (the connectome's two sides differ, and the weight
+# normalisation does not equalise them), which turns into a steady yaw drift.
+# Dry land hides this because the fly covers ground fast enough that the drift
+# barely bends the path; submerged, forward speed halves while the drift does
+# not, so the same bias curves the path twice as hard - measured straightness
+# 0.985 on land against 0.655 in water at depth 0.25.
+#
+# Swept against straightness AND speed in both presets:
+#     depth   dry straight / mm/s     water straight / mm/s
+#     0.25       0.985 / 10.03           0.655 / 5.30
+#     0.10       0.997 / 10.97           0.889 / 7.33
+#     0.05       0.997 / 11.13           0.964 / 7.79   <- chosen
+#     0.00       0.997 / 11.26           0.947 / 7.63
+# 0.05 beats 0.00 on water straightness while keeping the connectome's per-leg
+# contribution non-zero, so the term still does something rather than being
+# switched off.
+#
+# Note: explicitly balancing left against right was tried and made water WORSE
+# (0.553). The bias is not a clean left/right offset that can be subtracted.
+PER_LEG_DEPTH = 0.05
 
 
 @dataclass

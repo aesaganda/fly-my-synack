@@ -334,15 +334,19 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | dry_land | submerged_water | windy | hot | cold |
-  |---|---|---|---|---|---|
-  | net speed mm/s | 10.00 | **4.18** | 10.01 | 10.02 | 9.93 |
-  | straightness | 0.985 | **0.512** | 0.985 | 0.987 | 0.985 |
-  | fell over | no | no | no | no | no |
+  | metric | dry_land | humid_air | submerged_water | windy | hot | cold |
+  |---|---|---|---|---|---|---|
+  | net speed mm/s | 11.11 | 11.12 | **7.20** | 11.50 | 11.13 | 11.14 |
+  | straightness | 0.997 | 0.997 | **0.882** | 0.997 | 0.997 | 0.997 |
+  | fell over | no | no | no | no | no | no |
 
-  ~10 mm/s is the bottom of the ~10-20 mm/s range a real fly walks at. Water
-  costs ~58% of that - the drag signature - and is the one preset where the path
-  also stops being straight.
+  ~11 mm/s sits in the ~10-20 mm/s range a real fly walks at. Water costs ~35%
+  of that - the drag signature - and remains the least straight preset, for a
+  reason worth stating: the per-leg drive carries a small systematic left-right
+  bias, and because water halves the forward speed while leaving the yaw drift
+  alone, the same bias bends the path roughly twice as hard. It is a speed
+  effect, not a drag-asymmetry effect: open-loop in water, with no brain in the
+  loop, the path is straight (0.985).
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous
