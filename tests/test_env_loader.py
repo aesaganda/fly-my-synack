@@ -133,7 +133,7 @@ def test_apply_physics_writes_every_field_to_mjoption():
     assert model.opt.integrator == mujoco.mjtIntegrator.mjINT_IMPLICITFAST
 
     apply_physics(model, load_preset("windy"))
-    assert model.opt.wind[0] == pytest.approx(150.0)
+    assert model.opt.wind[0] == pytest.approx(1500.0)
     assert model.opt.integrator == mujoco.mjtIntegrator.mjINT_EULER
     assert model.opt.gravity[2] == pytest.approx(-9810.0)
 

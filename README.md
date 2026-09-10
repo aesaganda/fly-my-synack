@@ -98,7 +98,7 @@ flail.
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
 | `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
 | `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
-| `windy` | dry air + 0.15 m/s | 25 °C | lateral draught |
+| `windy` | dry air + 1.5 m/s | 25 °C | strong lateral wind |
 
 ```bash
 python3 run.py --list-envs
@@ -114,7 +114,7 @@ million.**
 |---|---|---|---|---|
 | `density` | g/mm³ | `1.184e-6` | `9.98e-4` | ×1e-6 |
 | `viscosity` | g/(mm·s) | `1.84e-5` | `1.002e-3` | ×1 (unchanged) |
-| `wind` | mm/s | `150` = 0.15 m/s | — | ×1e3 |
+| `wind` | mm/s | `1500` = 1.5 m/s | — | ×1e3 |
 | `gravity` | mm/s² | `-9810` | | ×1e3 |
 
 Every preset declares `units: mm_g_s` and the loader rejects anything else.
@@ -214,7 +214,7 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Sensory gains per preset** | Reasoned, not measured. Humidity and immersion plausibly change mechanosensory and antennal input; the numbers are invented. |
 | **Gait joint amplitudes** | Chosen by sweeping speed *and* postural stability together across coxa sweep, tibia sweep, lift, duty factor, stride frequency, actuator gain and adhesion. Reaches ~10 mm/s, the bottom of a real fly's ~10-20 mm/s, but the coxa excursion (2.6 rad ≈ 149°) is far beyond anything physiological. It moves the model convincingly; it is not measured Drosophila kinematics. |
 | **Leg adhesion gain** | 200, against MuJoCo's default of 1.0. Without it the foot slips through stance and a stride delivers a fraction of the travel its geometry implies — this single parameter was worth about 3x in speed. Above ~400 the foot sticks hard enough to pull the fly off a straight line. |
-| **Postural margin** | The model fly is only marginally stable. A crosswind above ~0.25 m/s rolls it onto its back, so `windy` is set to a 0.15 m/s draught. Per-leg drive is limited to ±25% for the same reason. |
+| **Postural margin** | `windy` runs at 1.5 m/s, which visibly shoves the fly without knocking it over. At 2.0 m/s it is lifted off the floor and tumbles away — a cliff, not a gradient. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
 
@@ -336,17 +336,23 @@ explicit about what that means:
 
   | metric | dry_land | humid_air | submerged_water | windy | hot | cold |
   |---|---|---|---|---|---|---|
-  | net speed mm/s | 11.11 | 11.12 | **7.20** | 11.50 | 11.13 | 11.14 |
-  | straightness | 0.997 | 0.997 | **0.882** | 0.997 | 0.997 | 0.997 |
+  | net speed mm/s | 11.11 | 11.12 | **7.20** | **7.12** | 11.13 | 11.14 |
+  | peak speed mm/s | 48.4 | 45.3 | 37.6 | **83.4** | 48.4 | 48.4 |
+  | straightness | 0.997 | 0.997 | **0.882** | **0.695** | 0.997 | 0.997 |
   | fell over | no | no | no | no | no | no |
 
-  ~11 mm/s sits in the ~10-20 mm/s range a real fly walks at. Water costs ~35%
-  of that - the drag signature - and remains the least straight preset, for a
-  reason worth stating: the per-leg drive carries a small systematic left-right
-  bias, and because water halves the forward speed while leaving the yaw drift
-  alone, the same bias bends the path roughly twice as hard. It is a speed
-  effect, not a drag-asymmetry effect: open-loop in water, with no brain in the
-  loop, the path is straight (0.985).
+  ~11 mm/s sits in the ~10-20 mm/s range a real fly walks at. The two presets
+  that are supposed to fight the fly both do:
+
+  * **Water** costs ~35% of the speed - the drag signature - and bends the path.
+    That curvature is a speed effect rather than a drag asymmetry: the per-leg
+    drive carries a small systematic left-right bias, and halving forward speed
+    while leaving the yaw drift alone bends the path twice as hard. Open-loop in
+    water, with no brain in the loop, the path is straight (0.985).
+  * **Wind** at 1.5 m/s knocks straightness down to 0.695 and shoves the fly
+    off its heading, while its *peak* speed rises to 83 mm/s - gusted along
+    faster than it can walk. It stays on its feet; at 2.0 m/s it is lifted off
+    the floor and tumbles away, which is a cliff rather than a gradient.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous
