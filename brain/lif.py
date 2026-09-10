@@ -183,6 +183,15 @@ class LIFNetwork:
         )
 
     def load_weights(self, path: str | Path) -> None:
+        """Restore synaptic weights ONLY - deliberately not the parameters.
+
+        The time constants in a checkpoint are Q10-scaled by whichever preset
+        happened to save it. Restoring them here silently overwrote every
+        preset's temperature with the first one's, which is precisely what
+        --compare-envs exists to vary: hot, cold and temperate all ran with the
+        same taus and produced identical behaviour. The checkpoint holds the
+        brain; the preset owns the temperature.
+        """
         ck = torch.load(path, map_location=self.device, weights_only=False)
         if list(ck["body_ids"]) != list(self.body_ids):
             raise ValueError(
@@ -192,4 +201,3 @@ class LIFNetwork:
         self.W = torch.sparse_coo_tensor(
             ck["W_indices"].to(self.device), ck["W_values"].to(self.device), (self.n, self.n)
         ).coalesce()
-        self.set_params(LIFParams(**ck["params"]))

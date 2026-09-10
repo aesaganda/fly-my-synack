@@ -334,25 +334,28 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | dry_land | humid_air | submerged_water | windy | hot | cold |
+  | metric | cold 15C | humid_air | dry_land 25C | hot 35C | windy | submerged |
   |---|---|---|---|---|---|---|
-  | net speed mm/s | 11.11 | 11.12 | **7.20** | **7.12** | 11.13 | 11.14 |
-  | peak speed mm/s | 48.4 | 45.3 | 37.6 | **83.4** | 48.4 | 48.4 |
-  | straightness | 0.997 | 0.997 | **0.882** | **0.695** | 0.997 | 0.997 |
+  | net speed mm/s | **4.28** | 9.89 | 9.73 | **11.48** | 6.98 | 6.35 |
+  | peak speed mm/s | 53.3 | 46.2 | 50.6 | 46.8 | **89.4** | 39.0 |
+  | straightness | 0.980 | 0.964 | 0.938 | 0.999 | **0.629** | **0.838** |
   | fell over | no | no | no | no | no | no |
 
-  ~11 mm/s sits in the ~10-20 mm/s range a real fly walks at. The two presets
-  that are supposed to fight the fly both do:
+  Every preset now does something distinct, and for a different reason:
 
-  * **Water** costs ~35% of the speed - the drag signature - and bends the path.
-    That curvature is a speed effect rather than a drag asymmetry: the per-leg
-    drive carries a small systematic left-right bias, and halving forward speed
-    while leaving the yaw drift alone bends the path twice as hard. Open-loop in
+  * **Temperature** spans 2.7x in walking speed, 4.3 mm/s at 15 C against
+    11.5 at 35 C. The causal chain is the intended one: Q10 shortens the
+    membrane time constants, leg motor pools fire faster (35 / 70 / 123 Hz at
+    15 / 25 / 35 C), the decoded descending drive rises and the CPG steps
+    quicker. Drosophila are ectotherms, so slower when cold is the right
+    direction. Hot is limited by the BODY, not the brain: above ~22 Hz stride
+    the position actuators stop tracking and the gait degrades, which is what
+    `MAX_FORWARD_DRIVE` is pinned to.
+  * **Wind** at 1.5 m/s shoves the fly off its heading - straightness 0.63 -
+    while gusting it to 89 mm/s peak, far faster than it can walk.
+  * **Water** costs ~35% of the speed through drag and bends the path. That
+    curvature is a speed effect rather than a drag asymmetry: open-loop in
     water, with no brain in the loop, the path is straight (0.985).
-  * **Wind** at 1.5 m/s knocks straightness down to 0.695 and shoves the fly
-    off its heading, while its *peak* speed rises to 83 mm/s - gusted along
-    faster than it can walk. It stays on its feet; at 2.0 m/s it is lifted off
-    the floor and tumbles away, which is a cliff rather than a gradient.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

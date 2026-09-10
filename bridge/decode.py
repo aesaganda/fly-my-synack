@@ -28,13 +28,24 @@ from brain.tables import DESCENDING, MOTOR
 # vnc_motor has fl=135, ml=116, hl=130 (plus non-leg ad/wm/nm/hm/xm).
 _SUBCLASS_TO_POS = {"fl": "F", "ml": "M", "hl": "H"}
 
-# Population rates are compared against a reference firing rate so the decoded
-# drive is interpretable: a population firing at REFERENCE_RATE_HZ produces
-# tanh(1) = 0.76 of full drive. Set from the measured leg motor-pool rate of
-# ~13 Hz - at the previous value of 60 the brain commanded only 0.2 of full
-# speed, i.e. a 2 Hz stride against a real fly's 10-20 Hz.
-# PLACEHOLDER tuning knobs, not measurements.
-REFERENCE_RATE_HZ = 10.0
+# Leg motor-pool rate that corresponds to full walking drive.
+#
+# This mapping used to be tanh(rate / 10), which SATURATED and silently threw
+# away the temperature signal. Q10 scaling gives leg pools that fire at 35 Hz
+# at 15 C, 70 Hz at 25 C and 123 Hz at 35 C - a 3.5x spread - but tanh of
+# 3.5 / 7.0 / 12.3 is 0.998 / 1.000 / 1.000, so hot, cold and temperate walked
+# at exactly the same speed. Q10 was working; nothing downstream could see it.
+#
+# Linear with a clip instead, referenced to the 25 C rate, so the whole
+# physiological range lands in the responsive part of the curve. The clip still
+# protects against a runaway network, which is what the tanh was there for.
+REFERENCE_RATE_HZ = 88.0
+# Ceiling on the descending drive. 1.2 is not an arbitrary safety margin - it is
+# where the BODY tops out. Above it the commanded stride passes ~22 Hz, the
+# position actuators can no longer track their targets, and the gait degrades:
+# at 1.5 the hot preset actually gets SLOWER (5.7 mm/s against 11.6) and its
+# straightness collapses to 0.40. Hot is limited by the legs, not the brain.
+MAX_FORWARD_DRIVE = 1.2
 TURN_REFERENCE_HZ = 25.0
 
 # How far per-leg drive may deviate from the mean.
@@ -129,10 +140,13 @@ class MotorDecoder:
         right = self._mean_rate(self.dn_right)
 
         # tanh keeps a runaway network from producing an absurd drive.
-        forward = float(np.tanh(leg_rates.mean() / REFERENCE_RATE_HZ)) if leg_rates.size else 0.0
+        forward = (
+            float(np.clip(leg_rates.mean() / REFERENCE_RATE_HZ, 0.0, MAX_FORWARD_DRIVE))
+            if leg_rates.size else 0.0
+        )
         turn = float(np.tanh((right - left) / TURN_REFERENCE_HZ))
 
-        forward = float(np.clip(forward + self.override.get("forward", 0.0), 0.0, 1.5))
+        forward = float(np.clip(forward + self.override.get("forward", 0.0), 0.0, MAX_FORWARD_DRIVE))
         turn = float(np.clip(turn + self.override.get("turn", 0.0), -1.0, 1.0))
 
         per_leg = (
