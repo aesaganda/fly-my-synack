@@ -9,7 +9,7 @@ import pytest
 from env.loader import EnvPreset, apply_physics, list_presets, load_preset
 from env.q10 import q10_factor, scale_tau_ms
 
-ALL = ["cold", "dry_land", "hot", "humid_air", "submerged_water", "windy"]
+ALL = ["cold", "dry_land", "hot", "humid_air", "submerged_water", "temperate", "windy"]
 
 
 def test_all_presets_present_and_loadable():
@@ -28,7 +28,7 @@ def test_water_density_is_in_model_units_not_si():
     assert 5e-4 < float(water.physics["density"]) < 5e-3
     assert 5e-4 < float(water.physics["viscosity"]) < 5e-3
 
-    air = load_preset("dry_land")
+    air = load_preset("temperate")
     assert 1e-7 < float(air.physics["density"]) < 1e-5
     # Water must be ~1000x denser than air, as in reality.
     assert float(water.physics["density"]) / float(air.physics["density"]) > 500

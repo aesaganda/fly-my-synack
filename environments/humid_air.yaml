@@ -13,11 +13,11 @@ physics:
   wind: [0.0, 0.0, 0.0]
   # Reduced tarsal grip on a damp surface, against the 200 used on dry ground.
   #
-  # Insect tarsal adhesion really is humidity-dependent, but the direction is
-  # regime-dependent and the literature is genuinely mixed: moderate humidity
-  # can INCREASE attachment through capillary bridges at the pad, while a
-  # condensed film on the surface reduces it. This preset takes the wet-film
-  # case. The mechanism is real; the number is a PLACEHOLDER.
+  # The WET side of the adhesion curve, against temperate's optimum of 200.
+  # Attachment peaks at intermediate humidity: the pads need some moisture to
+  # form capillary bridges (so dry_land, at ~20% RH, also grips poorly) but a
+  # condensed film on the surface makes them slip. The non-monotonic shape is
+  # documented; the specific number is a PLACEHOLDER.
   #
   # NOTE this is a CLOSED-LOOP effect, not raw mechanics. Driving the same body
   # from a fixed CPG with no brain, lower adhesion actually makes the fly

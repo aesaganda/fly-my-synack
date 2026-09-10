@@ -237,3 +237,31 @@ def test_humid_reduces_grip_and_costs_travel():
     assert humid_run["slip_ratio"] > dry_run["slip_ratio"], (
         f"slip {humid_run['slip_ratio']:.2f} humid vs {dry_run['slip_ratio']:.2f} dry"
     )
+
+
+def test_grip_peaks_at_intermediate_humidity():
+    """Attachment is NOT monotonic in humidity.
+
+    Insect tarsal pads need some moisture to form the capillary bridges that
+    create grip, so bone-dry air weakens them; a condensed film at high humidity
+    makes them slip, so saturated air weakens them too. Best grip is in the
+    middle. This is the shape the three air presets encode, and it is the reason
+    dry_land is not the fastest preset.
+    """
+    from env.loader import load_preset
+
+    dry = load_preset("dry_land").adhesion_gain
+    mid = load_preset("temperate").adhesion_gain
+    wet = load_preset("humid_air").adhesion_gain
+
+    assert dry < mid > wet, f"grip should peak in the middle: {dry} / {mid} / {wet}"
+    # Dry air should still be the better of the two extremes here - a dried pad
+    # grips worse than an optimal one but better than one on a wet film.
+    assert wet < dry
+
+    # And the air itself must NOT be doing the work: humid air is slightly
+    # lighter than dry, so no preset may claim extra drag for humidity.
+    densities = [float(load_preset(n).physics["density"])
+                 for n in ("dry_land", "temperate", "humid_air")]
+    assert densities[0] > densities[1] > densities[2], densities
+    assert max(densities) / min(densities) < 1.02, "humidity must not fake a drag effect"

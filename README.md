@@ -93,8 +93,9 @@ flail.
 
 | preset | medium | T | what changes |
 |---|---|---|---|
-| `dry_land` | still dry air | 25 °C | baseline |
-| `humid_air` | near-saturated air | 25 °C | sensory gains only (see note below) |
+| `temperate` | still air, ~60% RH | 25 °C | reference — best grip |
+| `dry_land` | still air, ~20% RH | 25 °C | dried pads, weaker grip |
+| `humid_air` | near-saturated air | 25 °C | water film, weakest grip |
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
 | `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
 | `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
@@ -338,16 +339,22 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | cold 15C | dry_land 25C | humid_air | hot 35C | windy | submerged |
-  |---|---|---|---|---|---|---|
-  | net speed mm/s | **2.69** | 10.77 | **5.84** | **12.28** | 6.95 | **0.86** |
-  | slip ratio | 0.53 | 0.52 | **0.72** | 0.51 | 0.55 | n/a |
-  | straightness | 0.631 | 0.990 | **0.78** | 0.997 | **0.702** | **0.482** |
-  | tarsal grip | 200 | 200 | **80** | 200 | 200 | 0 (swimming) |
-  | feet on the ground | 3.4 | 2.7 | 2.8 | 2.5 | 2.7 | **0.2** |
+  | metric | cold 15C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
+  |---|---|---|---|---|---|---|---|
+  | net speed mm/s | **2.69** | **7.68** | 10.75 | **5.20** | **12.28** | 6.95 | **0.86** |
+  | slip ratio | 0.53 | 0.63 | 0.52 | **0.75** | 0.51 | 0.55 | n/a |
+  | straightness | 0.631 | 0.817 | 0.989 | 0.689 | 0.997 | **0.702** | **0.482** |
+  | tarsal grip | 200 | **120** | 200 | **80** | 200 | 200 | 0 (swimming) |
 
   Every preset does something distinct, for a different reason:
 
+  * **Humidity is not monotonic.** Insect tarsal pads need some moisture to form
+    the capillary bridges that create grip, so bone-dry air weakens them; a
+    condensed film at saturation makes them slip, so wet air weakens them too.
+    Grip therefore PEAKS in the middle, and so does walking: 7.7 mm/s at ~20% RH,
+    10.8 at ~60%, 5.2 at ~90%. `temperate` is that optimum and is the reference
+    the others are read against. Dry air is not the fly's best case, which is
+    why `dry_land` is no longer the fastest preset.
   * **Temperature** spans 4.6x in walking speed through two channels. Q10
     shortens the membrane time constants, so leg motor pools fire faster
     (35 / 70 / 123 Hz at 15 / 25 / 35 C) and the CPG steps quicker; the same Q10
@@ -355,25 +362,18 @@ explicit about what that means:
     neural half, cold merely stepped less often while each step stayed crisp -
     slow motion rather than sluggishness. Hot is limited by the BODY: above
     ~22 Hz stride the actuators stop tracking.
-  * **Humidity** acts on GRIP, not on the air. Humid air is very slightly
-    *lighter* than dry, so the preset invents no drag; what changes is tarsal
-    adhesion on a damp substrate. The fly keeps stepping at normal speed
-    (~21 mm/s instantaneous) but loses roughly half its travel, and the slip
-    ratio rises from 0.52 to 0.72.
   * **Wind** at 1.5 m/s shoves the fly off its heading while gusting it to
     78 mm/s peak, far faster than it can walk.
   * **Water** is a different mode of locomotion, not a slow walk: suspended
     (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
 
-  A caveat on the humidity result, because it surprised me. It is a
-  **closed-loop** effect, not raw mechanics. Driving the same body from a fixed
-  CPG with no brain, lower adhesion makes the fly slightly *faster*
-  (11.7 against 11.2 mm/s). The slowdown appears only with the network in the
-  loop: less grip changes the mechanical load the legs report, which changes the
-  sensory drive and hence the descending command. Across seeds 0-2 it is cleanly
-  separated - 10.64 +- 0.08 mm/s dry against 5.84 +- 0.20 humid - so it is a
-  real and reproducible property of the closed loop, but it is not something you
-  could predict from the physics alone.
+  Note that none of the humidity presets touches drag. Humid air is very
+  slightly *lighter* than dry air, and the presets are asserted to stay within
+  2% of each other in density, so the effect cannot sneak in through the fluid
+  model. It is grip, and it is a closed-loop effect: driving the same body from
+  a fixed CPG with no brain, lower adhesion makes the fly slightly *faster*.
+  The slowdown appears only with the network in the loop, because less grip
+  changes the mechanical load the legs report and hence the descending drive.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

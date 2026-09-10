@@ -1,11 +1,28 @@
 name: dry_land
-description: Still, dry air at 25C. The baseline every other preset is compared against.
+description: >
+  Still, very dry air at 25C / ~20% RH. Dry air is not the fly's best case:
+  tarsal adhesion needs some moisture to form the capillary bridges that make
+  the pads stick, so bone-dry pads grip POORLY. Grip peaks at intermediate
+  humidity - see `temperate`, which is the reference - and falls off on both
+  sides, so this preset slips too, just less than `humid_air` does.
 units: mm_g_s
 
 physics:
   density: 1.184e-6      # dry air @25C, 101.325 kPa
   viscosity: 1.84e-5     # dry air @25C (Sutherland)
   wind: [0.0, 0.0, 0.0]
+  # The DRY side of the adhesion curve, against temperate's optimum of 200.
+  # Insect tarsal attachment is maximal at intermediate humidity: dried-out
+  # pads form few capillary bridges and grip badly, while a condensed film at
+  # high humidity makes them slip. The non-monotonic shape is documented in the
+  # literature; the specific number is a PLACEHOLDER.
+  #
+  # Swept in-situ against the peak:
+  #     200 -> 10.69 mm/s, slip 0.52   (= temperate, the optimum)
+  #     150 -> 10.47 mm/s, slip 0.51
+  #     120 ->  8.25 mm/s, slip 0.61   <- chosen
+  #     100 ->  6.68 mm/s, slip 0.69   (about as bad as humid_air)
+  adhesion_gain: 120.0
   gravity: [0.0, 0.0, -9810.0]
   integrator: Euler      # FlyGym default; fine when viscosity is negligible
 
@@ -15,5 +32,7 @@ neural:
   tau_clamp_ms: [2.0, 40.0]   # PLACEHOLDER guard rails.
 
 sensory:
-  mechanosensory_gain: 1.0     # reference condition, by definition
-  johnstons_organ_gain: 1.0
+  # Slightly reduced antennal drive: very dry air carries less to sense.
+  # PLACEHOLDER, like the other sensory gains.
+  mechanosensory_gain: 1.0
+  johnstons_organ_gain: 0.95

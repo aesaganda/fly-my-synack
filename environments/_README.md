@@ -33,9 +33,26 @@ Beyond the required ones, a preset may set:
 
 | field | default | meaning |
 |---|---|---|
-| `adhesion_gain` | 200 | tarsal grip. Lower = the fly slips on a damp surface. |
+| `adhesion_gain` | 200 | tarsal grip - see the humidity curve below. |
 | `locomotion` | `walk` | `walk` (tripod gait, adhesion on) or `swim` (synchronous rowing, adhesion off). |
 | `stroke_freq_hz` | body default (18) | limb cycle frequency. Swimming wants a slower one. |
+
+## Grip is not monotonic in humidity
+
+Insect tarsal attachment is maximal at INTERMEDIATE humidity. The adhesive pads
+need some moisture to form the capillary bridges that produce grip, so very dry
+air weakens them; a condensed water film on the substrate makes them slip, so
+very wet air weakens them too. The three air presets sit on that curve:
+
+| preset | RH | `adhesion_gain` | why |
+|---|---|---|---|
+| `dry_land` | ~20% | 120 | pads dried out, few capillary bridges |
+| `temperate` | ~60% | 200 | optimum - the reference |
+| `humid_air` | ~90% | 80 | water film on the surface |
+
+So the fastest walking is in the MIDDLE of the humidity range, not at either
+end. The shape is documented in the literature; the specific numbers here are
+placeholders.
 
 ## Placeholders
 
