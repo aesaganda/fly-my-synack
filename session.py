@@ -45,10 +45,16 @@ class RunMetrics:
         # reports ~0.43 for a trajectory that is actually near-straight. Sampling
         # roughly every 3 strides gives ~0.95 for the same run. Path length is
         # not a sampling-rate-free quantity, so the interval has to be pinned.
-        coarse = path[::20] if len(path) > 40 else path
+        # The decimation must KEEP THE LAST POINT, or the ratio below divides a
+        # full-length displacement by a short path length and reports a
+        # straightness above 1, which is geometrically impossible.
+        coarse = np.concatenate([path[::20], path[-1:]]) if len(path) > 40 else path
         travelled = (
             float(np.linalg.norm(np.diff(coarse, axis=0), axis=1).sum())
             if len(coarse) > 1 else 0.0
+        )
+        coarse_displacement = (
+            float(np.linalg.norm(coarse[-1] - coarse[0])) if len(coarse) > 1 else 0.0
         )
         # Net speed is the honest walking speed. mean_speed_mm_s is the mean of
         # instantaneous |velocity| and is inflated by per-step wobble; path
@@ -61,7 +67,9 @@ class RunMetrics:
             "peak_speed_mm_s": float(speeds.max()),
             "net_displacement_mm": displacement,
             # 1.0 = perfectly straight; lower = more curved/wandering path.
-            "path_straightness": float(displacement / travelled) if travelled > 1e-9 else 0.0,
+            "path_straightness": (
+                min(1.0, float(coarse_displacement / travelled)) if travelled > 1e-9 else 0.0
+            ),
             "gait_regularity": float(np.mean(self.gait_regularity)) if self.gait_regularity else 0.0,
             # Std of each joint over time, averaged - a blunt "is it still moving
             # its legs" number that separates walking from flailing or freezing.

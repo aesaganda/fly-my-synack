@@ -70,3 +70,21 @@ def test_live_metrics_are_serialisable():
     json.dumps(sess.live_metrics())
     assert sess.live_metrics()["preset"] == "windy"
     sess.body.close()
+
+
+def test_metrics_are_geometrically_possible():
+    """Guards a bug this metric has actually had.
+
+    Straightness is displacement / path length, so it cannot exceed 1. An
+    earlier version decimated the path for the length but measured displacement
+    over the full array, so the endpoints did not match and it reported 1.06.
+    """
+    sess = Session(preset="dry_land", **SMALL)
+    sess.run(600)
+    s = sess.metrics.summary()
+    assert 0.0 <= s["path_straightness"] <= 1.0
+    assert s["net_speed_mm_s"] >= 0.0
+    assert s["net_speed_mm_s"] <= s["mean_speed_mm_s"] + 1e-6, (
+        "net speed cannot exceed mean instantaneous speed"
+    )
+    sess.body.close()

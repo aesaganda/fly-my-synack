@@ -212,7 +212,8 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Tonic drive (1.05)** | With `--neuron-subset motor` everything upstream of the DNs is missing, so nothing would reach threshold. A constant background current stands in for the absent network. |
 | **Sensory encoding** | Contact force is injected into each leg's *motor* pool as a proprioceptive stand-in; a scalar air-motion term stands in for Johnston's organ. Real `vnc_sensory` neurons are used when the loaded subset contains them. Anatomically crude either way. |
 | **Sensory gains per preset** | Reasoned, not measured. Humidity and immersion plausibly change mechanosensory and antennal input; the numbers are invented. |
-| **Gait joint amplitudes** | Chosen by a sweep for forward travel *and* postural stability. Real flies walk ~10–20 mm/s; this gait manages ~3 mm/s net. Raising `COXA_SWING_RAD` to 2.5 and dropping `DUTY_FACTOR` to 0.5 roughly doubles that, at the cost of a visibly bouncing fly (fewer than three feet down 65% of the time, ±20° of pitch nodding per stride). The stable setting is the default. |
+| **Gait joint amplitudes** | Chosen by sweeping speed *and* postural stability together across coxa sweep, tibia sweep, lift, duty factor, stride frequency, actuator gain and adhesion. Reaches ~10 mm/s, the bottom of a real fly's ~10-20 mm/s, but the coxa excursion (2.6 rad ≈ 149°) is far beyond anything physiological. It moves the model convincingly; it is not measured Drosophila kinematics. |
+| **Leg adhesion gain** | 200, against MuJoCo's default of 1.0. Without it the foot slips through stance and a stride delivers a fraction of the travel its geometry implies — this single parameter was worth about 3x in speed. Above ~400 the foot sticks hard enough to pull the fly off a straight line. |
 | **Postural margin** | The model fly is only marginally stable. A crosswind above ~0.25 m/s rolls it onto its back, so `windy` is set to a 0.15 m/s draught. Per-leg drive is limited to ±25% for the same reason. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
@@ -335,13 +336,13 @@ explicit about what that means:
 
   | metric | dry_land | submerged_water | windy | hot | cold |
   |---|---|---|---|---|---|
-  | net speed mm/s | 2.98 | **1.41** | 3.12 | 2.88 | 2.89 |
-  | mean speed mm/s | 9.54 | **7.85** | 9.55 | 9.60 | 9.49 |
-  | straightness | 0.97 | **0.60** | 0.96 | 0.96 | 0.95 |
+  | net speed mm/s | 10.00 | **4.18** | 10.01 | 10.02 | 9.93 |
+  | straightness | 0.985 | **0.512** | 0.985 | 0.987 | 0.985 |
   | fell over | no | no | no | no | no |
 
-  Water halves net speed - the drag signature - and is the one preset where the
-  path also stops being straight.
+  ~10 mm/s is the bottom of the ~10-20 mm/s range a real fly walks at. Water
+  costs ~58% of that - the drag signature - and is the one preset where the path
+  also stops being straight.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous
@@ -350,7 +351,8 @@ explicit about what that means:
   one stride it charges the fly for its own sway and reports ~0.43 for a
   trajectory that is actually near-straight. Path length is not a
   sampling-rate-free quantity, so any "mm/s along the path" figure should be
-  distrusted - including one I quoted before pinning the interval.
+  distrusted - including one quoted earlier in this project's history, before
+  the interval was pinned.
 
 - The web UI: WebSocket frame streaming, preset switching, DN override, and
   pause/resume/reset all confirmed against a running server.

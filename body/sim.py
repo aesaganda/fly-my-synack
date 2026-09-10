@@ -49,18 +49,23 @@ COXA_PITCH, FEMUR_PITCH, TIBIA_PITCH, TARSUS_PITCH = 1, 3, 5, 6
 # falls to roughly +26 deg over 20k steps and forward speed nearly doubles.
 SIDE_SIGN = np.array([1.0 if leg.startswith("L") else -1.0 for leg in LEG_ORDER])
 
-# The tibia is deliberately NOT used for the fore-aft sweep. Measured foot
-# travel per +0.5 rad of tibia pitch:
+# The tibia carries the fore-aft sweep together with the coxa, but its effect
+# REVERSES between leg pairs. Measured foot travel per +0.5 rad of tibia pitch:
 #     front  dx = -0.275   (foot moves backward)
 #     mid    dx = -0.094
 #     hind   dx = +0.234   (foot moves FORWARD)
-# A single tibia sweep therefore propels the front legs while fighting the hind
-# ones, which shows up as a nose-up pitch bias of ~30 deg. Giving the hind pair
-# the opposite sign fixes the pitch but shortens the stride so much that speed
-# collapses. Driving the sweep from the coxa alone - which IS consistent across
-# all three pairs (+0.11 to +0.17 forward) - is both faster and better postured.
-COXA_SWING_RAD = 1.8     # fore-aft sweep at the thorax-coxa joint
-FEMUR_LIFT_RAD = 1.0     # femur flexion lifting the foot during swing
+# so it needs a per-pair sign; a single tibia term propels the front legs while
+# fighting the hind ones, which shows up as a ~30 deg nose-up pitch bias. With
+# the sign right the tibia is worth having twice over: it lengthens the stride,
+# and because tibia pitch also moves the foot vertically it partly cancels the
+# height change the coxa sweep causes - so the fly goes FASTER and nods LESS
+# than with the coxa alone (11.2 mm/s at 7.1 deg pitch sd, against 3.0 mm/s at
+# 11.6 deg).
+TIBIA_POS_SIGN = np.array([1.0 if leg[1] in "FM" else -1.0 for leg in LEG_ORDER])
+
+COXA_SWING_RAD = 2.6     # fore-aft sweep at the thorax-coxa joint
+TIBIA_SWING_RAD = 2.4    # tibia's share of the same sweep (per-pair sign)
+FEMUR_LIFT_RAD = 1.2     # femur flexion lifting the foot during swing
 
 # Fraction of the cycle a leg spends in stance. At 0.5 (a pure sinusoid) the two
 # tripods hand over instantaneously and, because the stance legs are themselves
@@ -91,7 +96,7 @@ class FlyBody:
         render: bool = False,
         seed: int = 0,
         actuator_gain: float = 20.0,
-        adhesion_gain: float = 20.0,
+        adhesion_gain: float = 200.0,
         camera_res: tuple[int, int] = (360, 480),
     ) -> None:
         # Imported here so `import body.legs` stays cheap and flygym-free.
@@ -115,8 +120,10 @@ class FlyBody:
         self.fly.add_actuators(
             dofs, actuator_type=ActuatorType.POSITION, kp=actuator_gain, neutral_input=neutral
         )
-        # Stronger than the default 1.0: the foot otherwise slips during stance
-        # and a stride delivers far less travel than its geometry implies.
+        # Far stronger than the default 1.0: the foot otherwise slips during
+        # stance and a stride delivers a fraction of the travel its geometry
+        # implies. Sweeping this was worth ~3x in speed. Beyond ~400 the foot
+        # sticks hard enough to drag the fly off a straight line.
         self.fly.add_leg_adhesion(gain=adhesion_gain)
         self._camera = self.fly.add_tracking_camera() if render else None
 
@@ -236,8 +243,10 @@ class FlyBody:
         offsets = np.zeros((len(phase), DOFS_PER_LEG))
         sweep, lift, _ = self._cycle(phase)
         offsets[:, COXA_PITCH] = COXA_SWING_RAD * sweep * SIDE_SIGN
-        # The tibia only helps the femur lift the foot clear during swing.
-        offsets[:, TIBIA_PITCH] = -0.5 * FEMUR_LIFT_RAD * lift
+        offsets[:, TIBIA_PITCH] = (
+            -TIBIA_SWING_RAD * sweep * SIDE_SIGN * TIBIA_POS_SIGN
+            - 0.5 * FEMUR_LIFT_RAD * lift
+        )
         # The femur lift is NOT mirrored: "up" is the same direction on both
         # sides, so flexing it needs the same sign left and right.
         offsets[:, FEMUR_PITCH] = -FEMUR_LIFT_RAD * lift
