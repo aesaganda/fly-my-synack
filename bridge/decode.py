@@ -40,12 +40,21 @@ _SUBCLASS_TO_POS = {"fl": "F", "ml": "M", "hl": "H"}
 # physiological range lands in the responsive part of the curve. The clip still
 # protects against a runaway network, which is what the tanh was there for.
 REFERENCE_RATE_HZ = 88.0
-# Ceiling on the descending drive. 1.2 is not an arbitrary safety margin - it is
-# where the BODY tops out. Above it the commanded stride passes ~22 Hz, the
-# position actuators can no longer track their targets, and the gait degrades:
-# at 1.5 the hot preset actually gets SLOWER (5.7 mm/s against 11.6) and its
-# straightness collapses to 0.40. Hot is limited by the legs, not the brain.
-MAX_FORWARD_DRIVE = 1.2
+# Ceiling on the descending drive. This is a runaway guard ONLY - it is
+# deliberately set well above the stride the body can actually track.
+#
+# It used to sit at 1.2, which is roughly the tracking limit (~22 Hz stride,
+# above which the position actuators cannot follow their targets). That hid a
+# real effect behind an artificial clamp on the brain: at 35 C the network
+# genuinely commands a faster stride than the muscle can execute, and clamping
+# the command pretended otherwise.
+#
+# Letting it through gives the hot preset its distinctive behaviour - the most
+# active preset by instantaneous speed and the least effective by travel - and
+# completes a thermal performance curve that peaks at 25 C rather than rising
+# forever. Only `hot` is affected: drive is ~0.43 at 15 C and ~0.89 at 25 C,
+# both far below this.
+MAX_FORWARD_DRIVE = 1.6
 TURN_REFERENCE_HZ = 25.0
 
 # How far per-leg drive may deviate from the mean.

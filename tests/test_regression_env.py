@@ -265,3 +265,143 @@ def test_grip_peaks_at_intermediate_humidity():
                  for n in ("dry_land", "temperate", "humid_air")]
     assert densities[0] > densities[1] > densities[2], densities
     assert max(densities) / min(densities) < 1.02, "humidity must not fake a drag effect"
+
+
+def body_timestep() -> float:
+    """MuJoCo timestep the body runs at."""
+    return 1e-4
+
+
+def test_windy_gusts_actually_vary_the_wind():
+    """Gusts must reach mjOption, and must swing wide enough to matter.
+
+    A steady wind cannot blow the fly around - below ~1.5 m/s it merely biases
+    the path, at 2.0 it rolls the fly onto its back for good, and at 2.5 it
+    lifts it off the floor entirely. Gusts are what buffet it, and only slow
+    ones: fast gusts average out and left the fly faster and straighter than
+    steady wind.
+    """
+    from env.loader import load_preset
+
+    windy = load_preset("windy")
+    assert windy.wind_gust is not None, "windy should gust, not blow steadily"
+    assert windy.wind_gust_hz < 1.0, "fast gusts average out and do not buffet"
+    assert windy.wind_gust[1] > 0, "lateral gusts are what push it off heading"
+
+    # Must cover a FULL gust period or the sample catches only part of the
+    # swing: at 0.3 Hz one cycle is 3.3 s, i.e. 33k steps at the 1e-4 timestep.
+    steps = int(1.2 / windy.wind_gust_hz / body_timestep())
+    body = FlyBody(windy)
+    winds = []
+    for _ in range(steps):
+        body.step(np.zeros(6), np.zeros(6))
+        winds.append(body.sim.mj_model.opt.wind[0])
+    body.close()
+
+    lo, hi = min(winds), max(winds)
+    assert hi - lo > 1000.0, f"gusts too weak to buffet: {lo:.0f}..{hi:.0f}"
+    # And must stay under the ~2 m/s speed that capsizes the fly outright.
+    assert hi < 2000.0, f"gust peak {hi:.0f} would roll the fly onto its back"
+
+
+def test_hot_is_frantic_not_fast():
+    """35 C sits PAST the thermal optimum, so hot must not just be a quicker
+    version of temperate.
+
+    Ectotherm locomotor performance rises to an optimum around 25-30 C and then
+    declines. Here the Q10 speed-up outruns the body: the network commands a
+    stride the legs cannot track. The signature is high leg speed with poor
+    travel - the most active preset, not the most effective.
+    """
+    from session import Session
+
+    def run(name):
+        sess = Session(preset=name, connectome="synthetic", subset="motor",
+                       synthetic_size=3000, connectome_dir="/tmp/flysim-test", seed=0)
+        summary = sess.run(12000)
+        sess.body.close()
+        return summary
+
+    hot, mid = run("hot"), run("temperate")
+
+    # Legs working harder than at the optimum...
+    assert hot["mean_speed_mm_s"] > mid["mean_speed_mm_s"], "hot should be the more active"
+    # ...while more of that motion is wasted.
+    assert hot["slip_ratio"] > mid["slip_ratio"], (
+        f"slip {hot['slip_ratio']:.2f} hot vs {mid['slip_ratio']:.2f} temperate"
+    )
+
+
+def test_cold_drags_rather_than_walking():
+    """10 C is cold enough that the fly stops running a tripod gait.
+
+    Both Q10 channels bite at once - membrane time constants stretch to ~70 ms
+    and muscle gain falls to ~5.7 - so the fly cannot hold itself up properly.
+    The signature is postural, not just slow: a walking fly keeps about three
+    feet down at any moment, a cold-stunned one sags and drags four or more.
+
+    This is the mirror of the hot preset. Both are slow, but cold has LOW leg
+    speed (the legs barely move) while hot has the highest of any preset (the
+    legs move faster than they can usefully track), so net speed alone would
+    make the two look alike.
+    """
+    from env.loader import load_preset
+
+    cold = load_preset("cold")
+    mid = load_preset("temperate")
+    assert cold.temperature_c < 12.0, "15 C is not cold enough to impair a fly"
+
+    # The Q10 must not be truncated by the guard rail - the upper tau bound is
+    # not stability-critical and previously clipped this preset by 13%.
+    wanted = 20.0 * (float(cold.neural["q10"]) ** ((25.0 - cold.temperature_c) / 10.0))
+    assert cold.scaled_taus({"tau_m_ms": 20.0})["tau_m_ms"] == pytest.approx(wanted), (
+        "tau_clamp_ms is truncating the cold preset's Q10"
+    )
+
+    def feet_down(preset):
+        body = FlyBody(preset)
+        cpg = TripodCPG(dt_s=body.timestep, seed=0)
+        counts = []
+        for i in range(6000):
+            phase, amplitude = cpg.step(0.4, 0.0, np.ones(6))
+            obs = body.step(phase, amplitude)
+            if i > 2000:
+                counts.append(int(obs["contact_found"].sum()))
+        body.close()
+        return float(np.mean(counts))
+
+    assert feet_down(cold) > feet_down(mid), "a cold fly should drag more feet than it lifts"
+
+
+def test_submerged_strokes_at_a_visible_rate():
+    """Limb frequencies must be tuned against the CLOSED-LOOP drive.
+
+    The CPG runs at stroke_freq_hz * the decoded descending drive, so a base
+    frequency picked from an open-loop sweep at full drive is wrong. This preset
+    was originally set to 8 Hz that way; closed-loop the drive is ~0.45, so the
+    fly actually stroked at 2.2 Hz - about one stroke every half second, which
+    reads as inert rather than swimming.
+
+    It was self-reinforcing too: with no ground contact the only limb load is
+    fluid drag, so feeble strokes produce little sensory drive, which produces
+    feebler strokes.
+    """
+    from session import Session
+
+    sess = Session(preset="submerged_water", connectome="synthetic", subset="motor",
+                   synthetic_size=3000, connectome_dir="/tmp/flysim-test", seed=0)
+    drives, contacts = [], []
+    for i in range(12000):
+        sess.step()
+        if i > 4000 and i % 100 == 0:
+            drives.append(sess._last_drive.forward)
+            contacts.append(int(
+                sess.body.sim.get_ground_contact_info(sess.body.name)[0].astype(bool).sum()
+            ))
+    base = sess.preset.stroke_freq_hz
+    sess.body.close()
+
+    realised = base * float(np.mean(drives))
+    assert realised > 5.0, f"realised stroke {realised:.1f} Hz - too slow to read as swimming"
+    # And it must be swimming, not paddling along the bottom.
+    assert np.mean(contacts) < 0.5, f"{np.mean(contacts):.2f} feet on the floor"

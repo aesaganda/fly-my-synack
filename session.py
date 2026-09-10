@@ -7,7 +7,7 @@ packages themselves stay independent.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import numpy as np
@@ -136,7 +136,10 @@ class Session:
         )
 
     def _params_for(self, preset: EnvPreset) -> LIFParams:
-        return self.base_params.scaled(preset.scaled_taus(self.base_params.base_taus()))
+        params = self.base_params.scaled(preset.scaled_taus(self.base_params.base_taus()))
+        if preset.tonic_drive is not None:
+            params = replace(params, tonic_drive=preset.tonic_drive)
+        return params
 
     def switch_preset(self, name: str) -> None:
         """Change environment mid-run: physics options and neuron taus together."""

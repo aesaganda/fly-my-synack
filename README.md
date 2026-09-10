@@ -97,9 +97,9 @@ flail.
 | `dry_land` | still air, ~20% RH | 25 °C | dried pads, weaker grip |
 | `humid_air` | near-saturated air | 25 °C | water film, weakest grip |
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
-| `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
-| `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
-| `windy` | dry air + 1.5 m/s | 25 °C | strong lateral wind |
+| `hot` | dry air | 35 °C | past the thermal optimum — frantic |
+| `cold` | dry air | 10 °C | near chill coma — sags and drags |
+| `windy` | dry air, gusty 0→1.9 m/s | 25 °C | buffeted off course |
 
 ```bash
 python3 run.py --list-envs
@@ -115,7 +115,7 @@ million.**
 |---|---|---|---|---|
 | `density` | g/mm³ | `1.184e-6` | `9.98e-4` | ×1e-6 |
 | `viscosity` | g/(mm·s) | `1.84e-5` | `1.002e-3` | ×1 (unchanged) |
-| `wind` | mm/s | `1500` = 1.5 m/s | — | ×1e3 |
+| `wind` | mm/s | `900` mean + `1200` gust | — | ×1e3 |
 | `gravity` | mm/s² | `-9810` | | ×1e3 |
 
 Every preset declares `units: mm_g_s` and the loader rejects anything else.
@@ -207,6 +207,7 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 |---|---|
 | **Fluid as density/viscosity** | MuJoCo's medium model, not CFD. Quadratic drag on body-sized shapes; no free surface, no wake, no wetting. "Submerged" means "immersed in a dense medium". |
 | **Buoyancy** | MuJoCo's fluid model provides drag and lift but **no buoyancy** — verified: a sphere with exactly the medium's density still sinks. Buoyancy is therefore folded into an effective gravity in the preset (−300 rather than −9810), which is a stand-in, not a force balance. |
+| **Swim arousal** | Swimming uses an elevated `tonic_drive` (1.40 against the default 1.05). Without it the mode settles into a self-sustaining torpor: with no ground contact the only limb load is fluid drag, so feeble strokes generate little sensory drive, which produces feebler strokes. A submerged insect struggling is real; the number is a placeholder. |
 | **Swimming** | Thrust is pure drag asymmetry: fast power stroke with the legs spread, slow recovery with them folded. Measured in open water — the asymmetric stroke moves the fly, a symmetric one gives ~0.005 mm/s, i.e. nothing. At 0.6 mm/s it is ~18x slower than walking, which is not a tuning failure: a millimetre-scale body in water sits at Reynolds ~1–10, where viscosity dominates and rowing is a poor way to travel. Real adult *Drosophila* are bad swimmers. Enabling MuJoCo's per-geom ellipsoid fluid model on the legs was tried and made it *worse* (0.17 vs 0.67 mm/s), since it disables the inertia-box model for those bodies. |
 | **Q10 = 2.3** | A **placeholder**, not a sourced constant. Drosophila are ectotherms and neural kinetics do scale with temperature, but the specific coefficient here is uncalibrated and depends on which process you mean. Fit it before using it. |
 | **Muscle Q10** | The position actuators stand in for muscle and their gain is scaled by the *same* Q10 as the membrane, inverted (warm muscle is faster; a warm membrane time constant is shorter). Muscle and membrane need not share a coefficient — this reuse is a placeholder. The gain is clamped to [4, 40]: below ~4 the fly cannot hold itself up, above ~40 the stiffness buys nothing. |
@@ -219,7 +220,8 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Humidity → tarsal grip** | Insect tarsal adhesion genuinely is humidity-dependent, but the direction is regime-dependent and the literature is mixed: moderate humidity can *increase* attachment through capillary bridges at the pad, while a condensed film on the surface reduces it. This preset takes the wet-film case. The mechanism is real; the number (80 against 200) is a placeholder. |
 | **Gait joint amplitudes** | Chosen by sweeping speed *and* postural stability together across coxa sweep, tibia sweep, lift, duty factor, stride frequency, actuator gain and adhesion. Reaches ~10 mm/s, the bottom of a real fly's ~10-20 mm/s, but the coxa excursion (2.6 rad ≈ 149°) is far beyond anything physiological. It moves the model convincingly; it is not measured Drosophila kinematics. |
 | **Leg adhesion gain** | 200, against MuJoCo's default of 1.0. Without it the foot slips through stance and a stride delivers a fraction of the travel its geometry implies — this single parameter was worth about 3x in speed. Above ~400 the foot sticks hard enough to pull the fly off a straight line. |
-| **Postural margin** | `windy` runs at 1.5 m/s, which visibly shoves the fly without knocking it over. At 2.0 m/s it is lifted off the floor and tumbles away — a cliff, not a gradient. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
+| **Postural margin** | The model fly is stable over a narrow wind band and cannot right itself once over, so `windy` gusts to ~1.9 m/s and no further: 2.0 m/s capsizes it permanently and 2.5 m/s carries it away. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
+| **Gust model** | Two incommensurate sines per axis, so gusts do not look metronomic. It is not turbulence — there is no spatial structure, no eddies, and every part of the body sees the same wind at the same instant. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
 
@@ -339,41 +341,34 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | cold 15C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
+  | metric | cold 10C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
   |---|---|---|---|---|---|---|---|
-  | net speed mm/s | **2.69** | **7.68** | 10.75 | **5.20** | **12.28** | 6.95 | **0.86** |
-  | slip ratio | 0.53 | 0.63 | 0.52 | **0.75** | 0.51 | 0.55 | n/a |
-  | straightness | 0.631 | 0.817 | 0.989 | 0.689 | 0.997 | **0.702** | **0.482** |
-  | tarsal grip | 200 | **120** | 200 | **80** | 200 | 200 | 0 (swimming) |
+  | net speed mm/s | **1.66** | 7.68 | **10.75** | 5.20 | 5.83 | 6.01 | **0.86** |
+  | leg speed mm/s | **4.7** | 21.4 | 22.5 | 20.7 | **29.0** | 24.6 | 3.1 |
+  | feet on the ground | **4.05** | 2.8 | 2.73 | 2.8 | **2.23** | 2.7 | **0.2** |
+  | slip ratio | 0.65 | 0.63 | **0.52** | 0.75 | **0.80** | 0.72 | n/a |
+  | straightness | 0.882 | 0.817 | **0.989** | 0.689 | **0.435** | **0.489** | **0.482** |
 
-  Every preset does something distinct, for a different reason:
+  Two of the axes are non-monotonic, so `temperate` is the best case on both:
 
-  * **Humidity is not monotonic.** Insect tarsal pads need some moisture to form
-    the capillary bridges that create grip, so bone-dry air weakens them; a
-    condensed film at saturation makes them slip, so wet air weakens them too.
-    Grip therefore PEAKS in the middle, and so does walking: 7.7 mm/s at ~20% RH,
-    10.8 at ~60%, 5.2 at ~90%. `temperate` is that optimum and is the reference
-    the others are read against. Dry air is not the fly's best case, which is
-    why `dry_land` is no longer the fastest preset.
-  * **Temperature** spans 4.6x in walking speed through two channels. Q10
-    shortens the membrane time constants, so leg motor pools fire faster
-    (35 / 70 / 123 Hz at 15 / 25 / 35 C) and the CPG steps quicker; the same Q10
-    scales the position actuators, which stand in for muscle. With only the
-    neural half, cold merely stepped less often while each step stayed crisp -
-    slow motion rather than sluggishness. Hot is limited by the BODY: above
-    ~22 Hz stride the actuators stop tracking.
-  * **Wind** at 1.5 m/s shoves the fly off its heading while gusting it to
-    78 mm/s peak, far faster than it can walk.
-  * **Water** is a different mode of locomotion, not a slow walk: suspended
-    (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
-
-  Note that none of the humidity presets touches drag. Humid air is very
-  slightly *lighter* than dry air, and the presets are asserted to stay within
-  2% of each other in density, so the effect cannot sneak in through the fluid
-  model. It is grip, and it is a closed-loop effect: driving the same body from
-  a fixed CPG with no brain, lower adhesion makes the fly slightly *faster*.
-  The slowdown appears only with the network in the loop, because less grip
-  changes the mechanical load the legs report and hence the descending drive.
+  * **Temperature peaks at 25 C and fails in OPPOSITE ways at the two ends.**
+    **Cold (10 C)** is near chill coma - *Drosophila* CTmin is roughly 4-8 C.
+    Both Q10 channels bite at once: membrane time constants stretch to ~70 ms
+    and muscle gain falls to 5.7, so the fly cannot hold itself up. It sags and
+    drags **4.05 feet** along the ground rather than running a three-point
+    tripod, with its legs barely moving (4.7 mm/s). **Hot (35 C)** is the
+    opposite failure: the nerve outruns the muscle. Leg pools fire at ~123 Hz,
+    the network commands a ~29 Hz stride the actuators cannot track, and the fly
+    thrashes - the highest leg speed of any preset (29.0), the FEWEST feet down
+    (2.23), 80% of the motion wasted and the path collapsing to 0.435.
+    Sluggish at one end, frantic at the other; net speed alone would confuse
+    them, which is why leg speed and feet-down are in the table.
+  * **Humidity peaks at ~60% RH** for an unrelated reason: tarsal pads need some
+    moisture to form the capillary bridges that grip, so dry air weakens them,
+    while a condensed film at saturation makes them slip.
+  * **Wind** gusts rather than blowing steadily - a steady wind can only bias
+    the path or delete it (2.0 m/s capsizes the fly, 2.5 carries it away).
+  * **Water** is a different mode of locomotion: suspended, rowing all six legs.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

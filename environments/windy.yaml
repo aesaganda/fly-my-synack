@@ -1,6 +1,6 @@
 name: windy
 description: >
-  Dry air at 25C with a steady 1.5 m/s wind - strong enough to shove the fly about. NOTE: MuJoCo's `wind` is
+  Dry air at 25C with gusty wind - calm to ~1.9 m/s and back, shoving the fly off course. NOTE: MuJoCo's `wind` is
   subtracted from body velocity and the resulting force scales with density and
   viscosity - so wind with zero density would be a silent no-op. Density is
   nonzero here on purpose.
@@ -9,28 +9,37 @@ units: mm_g_s
 physics:
   density: 1.184e-6
   viscosity: 1.84e-5
-  # 1.5 m/s along +x, in mm/s. Strong enough to visibly shove the fly around:
-  # it stays on its feet and keeps walking, but the path bends hard (measured
-  # straightness 0.75 against 0.997 in still air) and it is pushed downwind.
+  # GUSTY wind: a 0.9 m/s mean with 1.2 m/s gusts, so the air swings between
+  # dead calm and ~1.9 m/s roughly every three seconds.
   #
-  # There is a cliff just above this. Measured with the current gait:
-  #     <= 1.9 m/s  stays grounded, ~2.6 feet down, |roll| under 17 deg
-  #        2.0 m/s  lifted ~12 mm off the floor and tumbles, blown 1.2 m downwind
-  #        3.0 m/s  swept away at ~1.6 m/s, gone
-  # 1.5 leaves margin below that. Raise it if you want to study being blown
-  # over rather than walking in wind.
+  # A steady wind cannot blow the fly around - it can only bias its path or
+  # delete it. The band is narrow and was re-measured with the current gait:
+  #     1.5 m/s  bends the path, fly keeps walking
+  #     2.0 m/s  rolls it onto its back permanently (it has no righting reflex)
+  #     2.5 m/s  lifts it ~28 mm and sweeps it away at ~1 m/s
+  # There is no steady speed that buffets without one of those outcomes.
   #
-  # An earlier version of this preset sat at 0.15 m/s because the gait then was
-  # fragile enough to capsize at 0.25. The gait is much steadier now, so the
-  # wind no longer has to be a whisper.
-  wind: [1500.0, 0.0, 0.0]
+  # Gusts do buffet - but only SLOW ones. Fast gusts (1.5-2.5 Hz) made the fly
+  # FASTER and straighter than steady wind (14.1 mm/s, straightness 0.95),
+  # because the oscillation averages out and a brief shove cannot build momentum
+  # against feet gripping at 200. Each gust has to last long enough to
+  # accumulate, hence 0.3 Hz.
+  #
+  # Measured against the steady 1.5 m/s it replaces:
+  #     steady 1.5      net 9.86 mm/s, straightness 0.812, peak roll 38.6 deg
+  #     gusty 0.9+1.2   net 6.01 mm/s, straightness 0.489, peak roll 43.5 deg
+  wind: [900.0, 0.0, 0.0]
+  # Per-axis gust amplitude. The lateral component is what actually shoves the
+  # fly off its heading; a purely head-on gust mostly just slows it down.
+  wind_gust: [1200.0, 1080.0, 0.0]
+  wind_gust_hz: 0.30
   gravity: [0.0, 0.0, -9810.0]
   integrator: Euler
 
 neural:
   temperature_c: 25.0
   q10: 2.3               # PLACEHOLDER
-  tau_clamp_ms: [2.0, 40.0]
+  tau_clamp_ms: [2.0, 120.0]
 
 sensory:
   # PLACEHOLDER. Johnston's organ is the fly's wind/air-motion detector, so it

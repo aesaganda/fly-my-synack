@@ -35,13 +35,18 @@ def test_every_leg_gets_a_motor_neuron_population(net):
 
 
 def test_drive_is_bounded_even_when_the_network_saturates(net):
+    """The ceiling is a runaway guard, so assert against the constant itself -
+    a hardcoded number here goes stale the moment the ceiling is retuned."""
+    from bridge.decode import MAX_FORWARD_DRIVE, PER_LEG_DEPTH
+
     dec = MotorDecoder(net)
     for _ in range(200):
         net.step(torch.full((net.n,), 80.0))
     d = dec.decode()
-    assert 0.0 <= d.forward <= 1.5
+    assert 0.0 <= d.forward <= MAX_FORWARD_DRIVE
     assert -1.0 <= d.turn <= 1.0
-    assert np.all(d.per_leg_gain >= 0.2) and np.all(d.per_leg_gain <= 1.8)
+    assert np.all(d.per_leg_gain >= 1.0 - PER_LEG_DEPTH)
+    assert np.all(d.per_leg_gain <= 1.0 + PER_LEG_DEPTH)
 
 
 def test_silent_network_gives_no_forward_drive(net):

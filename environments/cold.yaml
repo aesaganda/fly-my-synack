@@ -1,18 +1,29 @@
 name: cold
-description: Dry air at 15C. Slower neural kinetics via Q10; slightly denser air.
+description: >
+  Dry air at 10C - genuinely cold for a fly, not merely cool. Drosophila are
+  severely impaired here, approaching the chill-coma range (CTmin is roughly
+  4-8C). Both channels of the Q10 bite at once: membrane time constants stretch
+  to ~70ms against 20ms at 25C, and muscle gain falls to ~5.7 against 20. The
+  result is not slow walking but a fly that cannot properly hold itself up -
+  it sags and drags about four feet along the ground instead of running a
+  three-point tripod. Sluggish in the literal sense.
 units: mm_g_s
 
 physics:
-  density: 1.225e-6      # dry air @15C
-  viscosity: 1.79e-5
+  density: 1.247e-6      # dry air @10C
+  viscosity: 1.76e-5     # air viscosity falls with temperature
   wind: [0.0, 0.0, 0.0]
   gravity: [0.0, 0.0, -9810.0]
   integrator: Euler
 
 neural:
-  temperature_c: 15.0
+  temperature_c: 10.0
   q10: 2.3               # PLACEHOLDER
-  tau_clamp_ms: [2.0, 40.0]
+  # The upper bound is deliberately well clear of the ~70ms this preset needs.
+  # It used to be 40, which silently truncated cold - and ONLY cold - by 13%,
+  # the same failure mode as a drive ceiling clamping away a real effect. Only
+  # the lower bound guards the integrator; a longer tau is more stable, not less.
+  tau_clamp_ms: [2.0, 120.0]
 
 sensory:
   mechanosensory_gain: 1.0
