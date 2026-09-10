@@ -223,7 +223,11 @@ class FlyBody:
     def apply_preset(self, preset: EnvPreset) -> None:
         self.preset = preset
         apply_physics(self.sim.mj_model, preset)
-        self._wind = np.asarray([float(w) for w in preset.physics["wind"]])
+        self._wind_mean = np.asarray([float(w) for w in preset.physics["wind"]])
+        gust = preset.wind_gust
+        self._gust_amp = None if gust is None else np.asarray(gust, dtype=float)
+        self._gust_hz = preset.wind_gust_hz
+        self._wind = self._wind_mean.copy()
         self.swimming = preset.locomotion == "swim"
         self._apply_adhesion(preset)
         self._apply_muscle_gain(preset)
@@ -337,7 +341,25 @@ class FlyBody:
         offsets *= amplitude[:, None]
         return self.neutral_angles + offsets.reshape(-1)
 
+    def _gust_wave(self) -> np.ndarray:
+        """Two incommensurate sines per axis, so gusts do not look metronomic.
+
+        Amplitude stays within [-1, 1] because the two terms are halved.
+        """
+        t = self.sim.mj_data.time
+        f = self._gust_hz
+        slow = np.sin(2 * np.pi * f * t + np.array([0.0, 1.9, 3.4]))
+        fast = np.sin(2 * np.pi * f * 2.7 * t + np.array([1.1, 0.3, 2.2]))
+        return 0.5 * slow + 0.5 * fast
+
+    def _update_wind(self) -> None:
+        if self._gust_amp is None:
+            return
+        self._wind = self._wind_mean + self._gust_amp * self._gust_wave()
+        self.sim.mj_model.opt.wind[:] = self._wind
+
     def step(self, phase: np.ndarray, amplitude: np.ndarray) -> dict:
+        self._update_wind()
         self.sim.set_actuator_inputs(
             self.name, self._ActuatorType.POSITION, self.joint_targets(phase, amplitude)
         )

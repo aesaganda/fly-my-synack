@@ -265,3 +265,40 @@ def test_grip_peaks_at_intermediate_humidity():
                  for n in ("dry_land", "temperate", "humid_air")]
     assert densities[0] > densities[1] > densities[2], densities
     assert max(densities) / min(densities) < 1.02, "humidity must not fake a drag effect"
+
+
+def body_timestep() -> float:
+    """MuJoCo timestep the body runs at."""
+    return 1e-4
+
+
+def test_windy_gusts_actually_vary_the_wind():
+    """Gusts must reach mjOption, and must swing wide enough to matter.
+
+    A steady wind cannot blow the fly around - below ~1.5 m/s it merely biases
+    the path, at 2.0 it rolls the fly onto its back for good, and at 2.5 it
+    lifts it off the floor entirely. Gusts are what buffet it, and only slow
+    ones: fast gusts average out and left the fly faster and straighter than
+    steady wind.
+    """
+    from env.loader import load_preset
+
+    windy = load_preset("windy")
+    assert windy.wind_gust is not None, "windy should gust, not blow steadily"
+    assert windy.wind_gust_hz < 1.0, "fast gusts average out and do not buffet"
+    assert windy.wind_gust[1] > 0, "lateral gusts are what push it off heading"
+
+    # Must cover a FULL gust period or the sample catches only part of the
+    # swing: at 0.3 Hz one cycle is 3.3 s, i.e. 33k steps at the 1e-4 timestep.
+    steps = int(1.2 / windy.wind_gust_hz / body_timestep())
+    body = FlyBody(windy)
+    winds = []
+    for _ in range(steps):
+        body.step(np.zeros(6), np.zeros(6))
+        winds.append(body.sim.mj_model.opt.wind[0])
+    body.close()
+
+    lo, hi = min(winds), max(winds)
+    assert hi - lo > 1000.0, f"gusts too weak to buffet: {lo:.0f}..{hi:.0f}"
+    # And must stay under the ~2 m/s speed that capsizes the fly outright.
+    assert hi < 2000.0, f"gust peak {hi:.0f} would roll the fly onto its back"

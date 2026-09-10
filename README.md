@@ -99,7 +99,7 @@ flail.
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
 | `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
 | `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
-| `windy` | dry air + 1.5 m/s | 25 °C | strong lateral wind |
+| `windy` | dry air, gusty 0→1.9 m/s | 25 °C | buffeted off course |
 
 ```bash
 python3 run.py --list-envs
@@ -115,7 +115,7 @@ million.**
 |---|---|---|---|---|
 | `density` | g/mm³ | `1.184e-6` | `9.98e-4` | ×1e-6 |
 | `viscosity` | g/(mm·s) | `1.84e-5` | `1.002e-3` | ×1 (unchanged) |
-| `wind` | mm/s | `1500` = 1.5 m/s | — | ×1e3 |
+| `wind` | mm/s | `900` mean + `1200` gust | — | ×1e3 |
 | `gravity` | mm/s² | `-9810` | | ×1e3 |
 
 Every preset declares `units: mm_g_s` and the loader rejects anything else.
@@ -219,7 +219,8 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 | **Humidity → tarsal grip** | Insect tarsal adhesion genuinely is humidity-dependent, but the direction is regime-dependent and the literature is mixed: moderate humidity can *increase* attachment through capillary bridges at the pad, while a condensed film on the surface reduces it. This preset takes the wet-film case. The mechanism is real; the number (80 against 200) is a placeholder. |
 | **Gait joint amplitudes** | Chosen by sweeping speed *and* postural stability together across coxa sweep, tibia sweep, lift, duty factor, stride frequency, actuator gain and adhesion. Reaches ~10 mm/s, the bottom of a real fly's ~10-20 mm/s, but the coxa excursion (2.6 rad ≈ 149°) is far beyond anything physiological. It moves the model convincingly; it is not measured Drosophila kinematics. |
 | **Leg adhesion gain** | 200, against MuJoCo's default of 1.0. Without it the foot slips through stance and a stride delivers a fraction of the travel its geometry implies — this single parameter was worth about 3x in speed. Above ~400 the foot sticks hard enough to pull the fly off a straight line. |
-| **Postural margin** | `windy` runs at 1.5 m/s, which visibly shoves the fly without knocking it over. At 2.0 m/s it is lifted off the floor and tumbles away — a cliff, not a gradient. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
+| **Postural margin** | The model fly is stable over a narrow wind band and cannot right itself once over, so `windy` gusts to ~1.9 m/s and no further: 2.0 m/s capsizes it permanently and 2.5 m/s carries it away. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
+| **Gust model** | Two incommensurate sines per axis, so gusts do not look metronomic. It is not turbulence — there is no spatial structure, no eddies, and every part of the body sees the same wind at the same instant. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
 
@@ -362,8 +363,14 @@ explicit about what that means:
     neural half, cold merely stepped less often while each step stayed crisp -
     slow motion rather than sluggishness. Hot is limited by the BODY: above
     ~22 Hz stride the actuators stop tracking.
-  * **Wind** at 1.5 m/s shoves the fly off its heading while gusting it to
-    78 mm/s peak, far faster than it can walk.
+  * **Wind** gusts rather than blowing steadily, because a steady wind cannot
+    buffet the fly - it can only bias its path or delete it. Re-measured with
+    the current gait: 1.5 m/s bends the path, 2.0 rolls the fly onto its back
+    for good (it has no righting reflex), 2.5 lifts it ~28 mm and sweeps it
+    away. `windy` therefore swings between dead calm and ~1.9 m/s every ~3 s,
+    which drops straightness to 0.49 and rocks it to 43 deg of roll while it
+    stays on its feet. Only SLOW gusts work: at 1.5-2.5 Hz the oscillation
+    averages out and left the fly *faster and straighter* than steady wind.
   * **Water** is a different mode of locomotion, not a slow walk: suspended
     (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
 
