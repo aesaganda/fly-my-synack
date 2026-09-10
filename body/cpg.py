@@ -23,17 +23,22 @@ COUPLING = 8.0        # phase-locking strength between legs
 
 
 class TripodCPG:
-    def __init__(self, dt_s: float, base_freq_hz: float = BASE_FREQ_HZ, seed: int = 0) -> None:
+    def __init__(self, dt_s: float, base_freq_hz: float = BASE_FREQ_HZ, seed: int = 0,
+                 synchronous: bool = False) -> None:
+        """`synchronous` puts all six legs in phase - a rowing stroke rather
+        than a tripod gait. Used when swimming, where there is no ground to
+        keep three feet on and the point is to sweep all limbs together."""
         self.dt = dt_s
         self.base_freq = base_freq_hz
+        self.synchronous = synchronous
         rng = np.random.default_rng(seed)
 
-        self.phase = np.zeros(6)
-        self.phase[list(_TRIPOD_B)] = np.pi
-        self.phase += rng.normal(0.0, 0.05, 6)  # break perfect symmetry
-
         self.target = np.zeros(6)
-        self.target[list(_TRIPOD_B)] = np.pi
+        if not synchronous:
+            self.target[list(_TRIPOD_B)] = np.pi
+
+        self.phase = self.target.copy()
+        self.phase += rng.normal(0.0, 0.05, 6)  # break perfect symmetry
         self.amplitude = np.ones(6)
 
     def step(self, forward: float, turn: float, per_leg_gain: np.ndarray, stop: bool = False):
@@ -73,6 +78,10 @@ class TripodCPG:
         1.0 = the two tripods are cleanly antiphase-locked; near 0 = the gait
         has fallen apart. Used as a `--compare-envs` metric.
         """
+        if self.synchronous:
+            # Rowing: all six should be locked together, so the order parameter
+            # over all legs is the right measure.
+            return float(np.abs(np.exp(1j * self.phase).mean()))
         a = np.exp(1j * self.phase[list(_TRIPOD_A)]).mean()
         b = np.exp(1j * self.phase[list(_TRIPOD_B)]).mean()
         return float(np.abs(a - b) / 2.0)

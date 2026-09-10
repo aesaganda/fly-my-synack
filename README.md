@@ -204,7 +204,9 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 
 | | |
 |---|---|
-| **Fluid as density/viscosity** | MuJoCo's medium model, not CFD. Gives buoyancy and quadratic drag on body-sized shapes; there is no free surface, no wake, no wetting. "Submerged" means "immersed in a dense medium". |
+| **Fluid as density/viscosity** | MuJoCo's medium model, not CFD. Quadratic drag on body-sized shapes; no free surface, no wake, no wetting. "Submerged" means "immersed in a dense medium". |
+| **Buoyancy** | MuJoCo's fluid model provides drag and lift but **no buoyancy** — verified: a sphere with exactly the medium's density still sinks. Buoyancy is therefore folded into an effective gravity in the preset (−300 rather than −9810), which is a stand-in, not a force balance. |
+| **Swimming** | Thrust is pure drag asymmetry: fast power stroke with the legs spread, slow recovery with them folded. Measured in open water — the asymmetric stroke moves the fly, a symmetric one gives ~0.005 mm/s, i.e. nothing. At 0.6 mm/s it is ~18x slower than walking, which is not a tuning failure: a millimetre-scale body in water sits at Reynolds ~1–10, where viscosity dominates and rowing is a poor way to travel. Real adult *Drosophila* are bad swimmers. Enabling MuJoCo's per-geom ellipsoid fluid model on the legs was tried and made it *worse* (0.17 vs 0.67 mm/s), since it disables the inertia-box model for those bodies. |
 | **Q10 = 2.3** | A **placeholder**, not a sourced constant. Drosophila are ectotherms and neural kinetics do scale with temperature, but the specific coefficient here is uncalibrated and depends on which process you mean. Fit it before using it. |
 | **`tau_clamp_ms`** | An integrator guard rail, not biology. |
 | **Locomotion is CPG-generated** | The gait comes from six coupled oscillators. The connectome steers; it does not walk. |
@@ -334,28 +336,27 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | cold 15C | humid_air | dry_land 25C | hot 35C | windy | submerged |
-  |---|---|---|---|---|---|---|
-  | net speed mm/s | **4.28** | 9.89 | 9.73 | **11.48** | 6.98 | 6.35 |
-  | peak speed mm/s | 53.3 | 46.2 | 50.6 | 46.8 | **89.4** | 39.0 |
-  | straightness | 0.980 | 0.964 | 0.938 | 0.999 | **0.629** | **0.838** |
-  | fell over | no | no | no | no | no | no |
+  | metric | cold 15C | dry_land 25C | hot 35C | windy | submerged |
+  |---|---|---|---|---|---|
+  | net speed mm/s | 5.38 | 10.77 | **11.47** | 6.95 | **0.61** |
+  | peak speed mm/s | 51.4 | 45.0 | 47.4 | **78.4** | 17.7 |
+  | straightness | 0.962 | 0.990 | 0.999 | **0.703** | **0.345** |
+  | feet on the ground | 2.7 | 2.7 | 2.7 | 2.7 | **0.2** |
+  | fell over | no | no | no | no | n/a (swimming) |
 
-  Every preset now does something distinct, and for a different reason:
+  Every preset does something distinct, for a different reason:
 
-  * **Temperature** spans 2.7x in walking speed, 4.3 mm/s at 15 C against
-    11.5 at 35 C. The causal chain is the intended one: Q10 shortens the
-    membrane time constants, leg motor pools fire faster (35 / 70 / 123 Hz at
-    15 / 25 / 35 C), the decoded descending drive rises and the CPG steps
-    quicker. Drosophila are ectotherms, so slower when cold is the right
-    direction. Hot is limited by the BODY, not the brain: above ~22 Hz stride
-    the position actuators stop tracking and the gait degrades, which is what
-    `MAX_FORWARD_DRIVE` is pinned to.
-  * **Wind** at 1.5 m/s shoves the fly off its heading - straightness 0.63 -
-    while gusting it to 89 mm/s peak, far faster than it can walk.
-  * **Water** costs ~35% of the speed through drag and bends the path. That
-    curvature is a speed effect rather than a drag asymmetry: open-loop in
-    water, with no brain in the loop, the path is straight (0.985).
+  * **Temperature** spans ~2x in walking speed. The causal chain is the intended
+    one: Q10 shortens the membrane time constants, leg motor pools fire faster
+    (35 / 70 / 123 Hz at 15 / 25 / 35 C), the descending drive rises and the CPG
+    steps quicker. Ectotherms are slower when cold, so the direction is right.
+    Hot is limited by the BODY: above ~22 Hz stride the position actuators stop
+    tracking, which is what `MAX_FORWARD_DRIVE` is pinned to.
+  * **Wind** at 1.5 m/s shoves the fly off its heading (straightness 0.70) while
+    gusting it to 78 mm/s peak, far faster than it can walk.
+  * **Water** is a different mode of locomotion, not a slow walk: the fly is
+    suspended (0.2 feet touching, against 2.7 on land), rowing all six legs in
+    synchrony. It manages 0.6 mm/s, and that is the honest answer - see below.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

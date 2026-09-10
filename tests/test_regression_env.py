@@ -96,3 +96,70 @@ def test_wind_displaces_the_fly():
     still = _run("dry_land")
     windy = _run("windy")
     assert not np.allclose(still["angles"], windy["angles"])
+
+
+def test_submerged_swims_rather_than_walking():
+    """The submerged preset must be a different mode of locomotion, not a
+    slower walk: legs rowing in synchrony, feet off the floor, no adhesion."""
+    from env.loader import load_preset
+
+    water = load_preset("submerged_water")
+    land = load_preset("dry_land")
+    assert water.locomotion == "swim"
+    assert land.locomotion == "walk"
+
+    body = FlyBody(water)
+    assert body.swimming
+    # Buoyancy is folded into effective gravity; MuJoCo's fluid model has none.
+    assert abs(float(water.physics["gravity"][2])) < abs(float(land.physics["gravity"][2]))
+
+    cpg = TripodCPG(dt_s=body.timestep, seed=0, synchronous=True)
+    contacts = []
+    for i in range(6000):
+        phase, amplitude = cpg.step(forward=1.0, turn=0.0, per_leg_gain=np.ones(6))
+        obs = body.step(phase, amplitude)
+        if i > 2000:
+            contacts.append(int(obs["contact_found"].sum()))
+    body.close()
+
+    # A walking fly holds ~3 feet down; a swimming one should mostly be clear.
+    assert np.mean(contacts) < 1.5, f"still standing on the floor ({np.mean(contacts):.2f} feet down)"
+
+
+def test_swim_thrust_needs_an_asymmetric_stroke():
+    """Thrust comes from drag asymmetry, so a symmetric stroke must go nowhere.
+
+    This is the whole propulsive mechanism: fast power stroke with the legs
+    spread, slow recovery with them folded.
+    """
+    import body.sim as bs
+    from env.loader import load_preset
+
+    def travel(fold, power_fraction):
+        old_fold, old_pf = bs.SWIM_FOLD_RAD, bs.SWIM_POWER_FRACTION
+        bs.SWIM_FOLD_RAD, bs.SWIM_POWER_FRACTION = fold, power_fraction
+        try:
+            preset = load_preset("submerged_water")
+            preset.physics["gravity"] = [0.0, 0.0, 0.0]  # isolate thrust
+            body = FlyBody(preset)
+            body.sim.mj_data.qpos[2] += 25.0  # suspend clear of the floor
+            body.sim.mj_data.qvel[:] = 0
+            cpg = TripodCPG(dt_s=body.timestep, seed=0, synchronous=True)
+            start = None
+            for i in range(12000):
+                phase, amplitude = cpg.step(1.0, 0.0, np.ones(6))
+                obs = body.step(phase, amplitude)
+                if i == 2000:
+                    start = obs["position"].copy()
+            end = body._prev_pos.copy()
+            body.close()
+            return float(np.linalg.norm((end - start)[:2]))
+        finally:
+            bs.SWIM_FOLD_RAD, bs.SWIM_POWER_FRACTION = old_fold, old_pf
+
+    asymmetric = travel(fold=1.8, power_fraction=0.35)
+    symmetric = travel(fold=0.0, power_fraction=0.5)
+    assert asymmetric > 5 * max(symmetric, 1e-4), (
+        f"asymmetric stroke {asymmetric:.3f} mm vs symmetric {symmetric:.3f} mm - "
+        "thrust should come from the asymmetry"
+    )

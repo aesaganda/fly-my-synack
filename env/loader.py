@@ -26,6 +26,11 @@ _REQUIRED_PHYSICS = ("density", "viscosity", "wind", "gravity", "integrator")
 _REQUIRED_NEURAL = ("temperature_c", "q10", "tau_clamp_ms")
 _REQUIRED_SENSORY = ("mechanosensory_gain", "johnstons_organ_gain")
 
+# How the body moves in this medium. "walk" is a tripod gait against the
+# ground; "swim" is a synchronous rowing stroke with no adhesion, for a fly
+# that is suspended in the fluid rather than standing on the floor.
+LOCOMOTION_MODES = ("walk", "swim")
+
 # MuJoCo integrator names accepted in YAML -> mjtIntegrator enum member name.
 _INTEGRATORS = {
     "euler": "mjINT_EULER",
@@ -47,6 +52,21 @@ class EnvPreset:
     @property
     def temperature_c(self) -> float:
         return float(self.neural["temperature_c"])
+
+    @property
+    def locomotion(self) -> str:
+        """"walk" (default) or "swim"."""
+        return str(self.physics.get("locomotion", "walk"))
+
+    @property
+    def stroke_freq_hz(self) -> float | None:
+        """Base limb-cycle frequency, or None to use the body's default.
+
+        Swimming wants a slower cycle than walking: in a viscous medium the
+        legs cannot be thrashed usefully, and a fast stroke just stirs.
+        """
+        value = self.physics.get("stroke_freq_hz")
+        return float(value) if value is not None else None
 
     def scaled_taus(self, base_taus_ms: dict[str, float]) -> dict[str, float]:
         """Apply this preset's Q10 scaling to a dict of base time constants."""
@@ -99,6 +119,10 @@ def load_preset(name: str, preset_dir: Path | None = None) -> EnvPreset:
         missing = [k for k in required if k not in block]
         if missing:
             raise ValueError(f"{path}: {section} is missing {missing}")
+
+    mode = str(raw["physics"].get("locomotion", "walk")).lower()
+    if mode not in LOCOMOTION_MODES:
+        raise ValueError(f"{path}: unknown locomotion {mode!r}, expected one of {LOCOMOTION_MODES}")
 
     integrator = str(raw["physics"]["integrator"]).lower()
     if integrator not in _INTEGRATORS:

@@ -80,6 +80,20 @@ DUTY_FACTOR = 0.65
 # fly's. It moves the model convincingly; it is not a reproduction of measured
 # Drosophila kinematics.
 
+# Swimming stroke. Nothing to push against, so thrust comes purely from drag
+# asymmetry: a fast power stroke with the legs spread, then a slow recovery with
+# them folded in. Verified in open water with the fly suspended clear of the
+# floor - the asymmetric stroke gives ~0.7 mm/s while a symmetric, unfolded one
+# gives 0.005, i.e. essentially nothing. That is the whole propulsive mechanism.
+#
+# It is slow, and honestly so: a millimetre-scale body rowing in water sits at a
+# Reynolds number of order 1-10, where viscosity dominates and rowing is a poor
+# way to travel. Real adult Drosophila are bad swimmers too. Do not expect
+# walking speeds here.
+SWIM_SWEEP_RAD = 2.5      # fore-aft sweep of the rowing stroke
+SWIM_FOLD_RAD = 1.8       # femur/tibia flexion during recovery, to cut drag
+SWIM_POWER_FRACTION = 0.35  # fraction of the cycle spent on the power stroke
+
 THORAX_SEGMENT = "c_thorax"
 FALL_HEIGHT_MM = 0.25   # thorax centre below this = collapsed onto the ground
 # A height check alone is blind to the failure that actually happens: the fly
@@ -152,6 +166,7 @@ class FlyBody:
 
         # Preset must be applied AFTER add_fly: add_fly overwrites <option> from
         # the fly's own mujoco_globals.yaml.
+        self.swimming = False
         self.apply_preset(preset)
 
         # The renderer is created lazily on first use, NOT here: the GL context
@@ -179,6 +194,7 @@ class FlyBody:
         self.preset = preset
         apply_physics(self.sim.mj_model, preset)
         self._wind = np.asarray([float(w) for w in preset.physics["wind"]])
+        self.swimming = preset.locomotion == "swim"
 
     # ---------- rendering ----------
 
@@ -238,8 +254,28 @@ class FlyBody:
         """True where the foot is planted and pushing."""
         return cls._cycle(phase)[2]
 
+    def _swim_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
+        """Rowing stroke: sweep the legs back fast, fold them, bring them forward."""
+        u = (phase / (2 * np.pi)) % 1.0
+        power = u < SWIM_POWER_FRACTION
+        frac = np.where(
+            power, u / SWIM_POWER_FRACTION,
+            (u - SWIM_POWER_FRACTION) / (1.0 - SWIM_POWER_FRACTION),
+        )
+        stroke = np.where(power, np.cos(np.pi * frac), -np.cos(np.pi * frac))
+        fold = np.where(power, 0.0, -SWIM_FOLD_RAD)
+
+        offsets = np.zeros((len(phase), DOFS_PER_LEG))
+        offsets[:, COXA_PITCH] = SWIM_SWEEP_RAD * stroke * SIDE_SIGN
+        offsets[:, FEMUR_PITCH] = fold
+        offsets[:, TIBIA_PITCH] = fold
+        offsets *= amplitude[:, None]
+        return self.neutral_angles + offsets.reshape(-1)
+
     def joint_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
         """Turn six leg phases into 42 joint-angle targets."""
+        if self.swimming:
+            return self._swim_targets(phase, amplitude)
         offsets = np.zeros((len(phase), DOFS_PER_LEG))
         sweep, lift, _ = self._cycle(phase)
         offsets[:, COXA_PITCH] = COXA_SWING_RAD * sweep * SIDE_SIGN
@@ -258,12 +294,27 @@ class FlyBody:
             self.name, self._ActuatorType.POSITION, self.joint_targets(phase, amplitude)
         )
         # Adhesion on during stance, off during swing - otherwise the fly drags
-        # its feet and cannot lift them.
-        self.sim.set_leg_adhesion_states(self.name, self.stance_mask(phase).astype(float))
+        # its feet and cannot lift them. Swimming has nothing to grip, so it is
+        # off entirely; leaving it on lets the fly haul itself along the floor,
+        # which is exactly the walking-underwater look this mode replaces.
+        adhesion = (
+            np.zeros(6) if self.swimming else self.stance_mask(phase).astype(float)
+        )
+        self.sim.set_leg_adhesion_states(self.name, adhesion)
 
         self.sim.step()
 
         contact_found, contact_forces, *_ = self.sim.get_ground_contact_info(self.name)
+        # Per-leg mechanical load. Ground reaction alone is useless when
+        # swimming - measured 0.01 per leg underwater against 85.9 on land -
+        # because there is nothing to push on. Actuator effort is ~57 per leg in
+        # BOTH media, since underwater the legs are working against fluid drag
+        # instead. Real proprioceptors sense limb load, not specifically ground
+        # contact, so summing the two gives a signal that survives both modes.
+        actuator_force = np.abs(
+            np.asarray(self.sim.get_actuator_forces(self.name, self._ActuatorType.POSITION))
+        ).reshape(len(LEG_ORDER), DOFS_PER_LEG).sum(axis=1)
+        contact_magnitude = np.linalg.norm(np.asarray(contact_forces), axis=1)
         pos = self._thorax_position()
         velocity = (pos - self._prev_pos) / self.timestep if self._prev_pos is not None else np.zeros(3)
         self._prev_pos = pos
@@ -273,16 +324,25 @@ class FlyBody:
         return {
             "position": pos,
             "speed": self.last_speed,
-            "contact_forces": np.linalg.norm(np.asarray(contact_forces), axis=1),
+            "contact_forces": contact_magnitude,
+            "leg_load": contact_magnitude + actuator_force,
             "contact_found": np.asarray(contact_found) > 0,  # float sensor, not a bool
             "air_speed": float(np.linalg.norm(velocity - self._wind)),
             "joint_angles": np.asarray(self.sim.get_joint_angles(self.name)),
             "roll_deg": roll,
             "pitch_deg": pitch,
-            "fell_over": bool(
-                pos[2] < FALL_HEIGHT_MM
-                or abs(roll) > FALL_ROLL_DEG
-                or abs(pitch) > FALL_PITCH_DEG
+            # "Fell over" is a walking concept: it means the gait collapsed and
+            # the animal is on its back or its belly. A swimming fly is
+            # suspended in fluid with no feet down, and pitching or rolling is
+            # ordinary behaviour there, not failure - so the check is not
+            # applied in swim mode rather than firing spuriously.
+            "fell_over": (
+                False if self.swimming
+                else bool(
+                    pos[2] < FALL_HEIGHT_MM
+                    or abs(roll) > FALL_ROLL_DEG
+                    or abs(pitch) > FALL_PITCH_DEG
+                )
             ),
         }
 

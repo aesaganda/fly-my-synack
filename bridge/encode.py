@@ -6,9 +6,11 @@ This is the weakest link in the whole pipeline and is labelled as such in the
 README. Real flies have ~6,370 `vnc_sensory` neurons with specific modalities
 and receptive fields. Here:
 
-  * leg contact force is injected into that leg's own motor-neuron pool, which
-    stands in for proprioceptive/campaniform feedback without modelling any of
-    the actual sensory afferents;
+  * per-leg mechanical load - ground reaction plus actuator effort - is
+    injected into that leg's own motor-neuron pool, standing in for
+    proprioceptive/campaniform feedback without modelling any of the actual
+    sensory afferents. Load rather than ground contact specifically, so the
+    signal survives swimming, where nothing touches the floor;
   * a scalar "air motion" term stands in for Johnston's organ.
 
 When the loaded subset does contain `vnc_sensory` neurons they are used as the
@@ -28,8 +30,11 @@ from bridge.decode import MotorDecoder
 
 SENSORY_SUPERCLASS = "vnc_sensory"
 
-# Converts contact force (model units, uN) to injected current. PLACEHOLDER.
-CONTACT_GAIN = 0.02
+# Converts per-leg mechanical load (model units, uN) to injected current.
+# Rescaled from 0.02 when the signal changed from ground contact alone (~86 per
+# leg on land) to contact plus actuator effort (~142), so that walking on dry
+# land receives about the same drive as before. PLACEHOLDER.
+CONTACT_GAIN = 0.012
 AIR_MOTION_GAIN = 0.001  # per mm/s of relative air speed. PLACEHOLDER.
 
 
@@ -48,19 +53,21 @@ class SensoryEncoder:
 
     def encode(
         self,
-        contact_forces: np.ndarray,
+        leg_load: np.ndarray,
         air_speed: float,
         mechanosensory_gain: float,
         johnstons_organ_gain: float,
     ) -> torch.Tensor:
         """Return the per-neuron external current for this step.
 
-        contact_forces: (6,) force magnitude per leg, in LEG_ORDER order.
+        leg_load:  (6,) mechanical load per leg, in LEG_ORDER order - ground
+                   reaction plus actuator effort, so it is non-zero when
+                   swimming as well as when walking.
         air_speed:      scalar magnitude of body velocity relative to the medium.
         """
         self.buffer.zero_()
 
-        for leg, force in zip(LEG_ORDER, np.asarray(contact_forces, dtype=float)):
+        for leg, force in zip(LEG_ORDER, np.asarray(leg_load, dtype=float)):
             idx = self.decoder.leg_groups[leg]
             if len(idx):
                 self.buffer[idx] += float(force) * CONTACT_GAIN * mechanosensory_gain
