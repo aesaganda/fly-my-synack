@@ -14,24 +14,42 @@ physics:
   # sinks. So the buoyant force is folded into an effective gravity instead.
   # An insect is slightly denser than water, so the net downward acceleration
   # is roughly (rho_body - rho_water)/rho_body * g; at ~1.1 g/cm^3 that is
-  # about 9% of g, hence ~-880. Rounded to -300 so the fly hangs in the water
-  # instead of settling onto the floor, which is what makes it read as
-  # swimming rather than trudging.
-  gravity: [0.0, 0.0, -300.0]
+  # about 9% of g, hence ~-880.
+  #
+  # Set to -160 instead, which is where the fly HOVERS. The rowing stroke has a
+  # net upward component, so vertical drift crosses zero between -200 and -120:
+  #     -300  sinks at 0.16 mm/s
+  #     -200  sinks at 0.22 mm/s
+  #     -120  RISES at 0.25 mm/s
+  #      -60  rises at 0.22 mm/s
+  # At -160 the stroke roughly cancels the residual weight and the fly holds its
+  # depth while swimming forwards, instead of slowly settling onto the floor.
+  gravity: [0.0, 0.0, -160.0]
   # Rowing stroke, no adhesion - see body/sim.py. With adhesion on and a walking
   # gait the fly simply hauls itself along the bottom.
   locomotion: swim
-  # Slower limb cycle than walking's 18 Hz. Swept in-situ: 8 Hz gives the best
-  # true swimming (1.21 mm/s with only 0.2 feet touching and the body floating
-  # highest), while 18 Hz just thrashes for half the speed and 2 Hz is really
-  # the fly pushing off the bottom again. A viscous medium does not reward
-  # thrashing.
-  stroke_freq_hz: 8.0
+  # NOTE this is a BASE frequency: the CPG runs at stroke_freq_hz * the decoded
+  # descending drive, so the realised stroke is always slower. Underwater the
+  # closed-loop drive settles around 0.45, so 25 Hz here gives a ~11 Hz stroke.
+  #
+  # This was originally 8 Hz, picked from an open-loop sweep at full drive. That
+  # was a tuning error: closed-loop the drive is ~0.27-0.45, so the fly actually
+  # stroked at 2.2 Hz - roughly one stroke every half second, which reads as
+  # inert rather than swimming, and is outside the range the sweep covered.
+  # Tune limb frequencies against the drive the brain actually produces.
+  stroke_freq_hz: 25.0
   # MuJoCo docs: the Euler integrator handles BODY viscosity poorly. At this
   # viscosity Euler goes unstable, so switch integrators for this preset.
   integrator: implicitfast
 
 neural:
+  # Elevated background excitation: a submerged insect struggles rather than
+  # drifting calmly, and without it the swim mode settles into a self-sustaining
+  # torpor. With no ground contact the only limb load is fluid drag, so feeble
+  # strokes generate little sensory drive, which produces feebler strokes still.
+  # Raising arousal breaks that loop. PLACEHOLDER value - the escape response is
+  # real, this number is not measured.
+  tonic_drive: 1.40
   temperature_c: 20.0
   q10: 2.3               # PLACEHOLDER
   tau_clamp_ms: [2.0, 120.0]

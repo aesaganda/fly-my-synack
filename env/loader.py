@@ -59,6 +59,17 @@ class EnvPreset:
         return str(self.physics.get("locomotion", "walk"))
 
     @property
+    def tonic_drive(self) -> float | None:
+        """Background excitation, or None for the network default.
+
+        Stands in for everything the loaded subset leaves out. A preset can
+        raise it to represent arousal - a submerged fly struggles rather than
+        drifting calmly.
+        """
+        value = self.neural.get("tonic_drive")
+        return float(value) if value is not None else None
+
+    @property
     def wind_gust(self) -> list[float] | None:
         """Gust amplitude per axis, added to the mean wind. None = steady wind.
 

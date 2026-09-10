@@ -371,3 +371,37 @@ def test_cold_drags_rather_than_walking():
         return float(np.mean(counts))
 
     assert feet_down(cold) > feet_down(mid), "a cold fly should drag more feet than it lifts"
+
+
+def test_submerged_strokes_at_a_visible_rate():
+    """Limb frequencies must be tuned against the CLOSED-LOOP drive.
+
+    The CPG runs at stroke_freq_hz * the decoded descending drive, so a base
+    frequency picked from an open-loop sweep at full drive is wrong. This preset
+    was originally set to 8 Hz that way; closed-loop the drive is ~0.45, so the
+    fly actually stroked at 2.2 Hz - about one stroke every half second, which
+    reads as inert rather than swimming.
+
+    It was self-reinforcing too: with no ground contact the only limb load is
+    fluid drag, so feeble strokes produce little sensory drive, which produces
+    feebler strokes.
+    """
+    from session import Session
+
+    sess = Session(preset="submerged_water", connectome="synthetic", subset="motor",
+                   synthetic_size=3000, connectome_dir="/tmp/flysim-test", seed=0)
+    drives, contacts = [], []
+    for i in range(12000):
+        sess.step()
+        if i > 4000 and i % 100 == 0:
+            drives.append(sess._last_drive.forward)
+            contacts.append(int(
+                sess.body.sim.get_ground_contact_info(sess.body.name)[0].astype(bool).sum()
+            ))
+    base = sess.preset.stroke_freq_hz
+    sess.body.close()
+
+    realised = base * float(np.mean(drives))
+    assert realised > 5.0, f"realised stroke {realised:.1f} Hz - too slow to read as swimming"
+    # And it must be swimming, not paddling along the bottom.
+    assert np.mean(contacts) < 0.5, f"{np.mean(contacts):.2f} feet on the floor"
