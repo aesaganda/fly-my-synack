@@ -163,3 +163,36 @@ def test_swim_thrust_needs_an_asymmetric_stroke():
         f"asymmetric stroke {asymmetric:.3f} mm vs symmetric {symmetric:.3f} mm - "
         "thrust should come from the asymmetry"
     )
+
+
+def test_cold_is_sluggish_in_muscle_as_well_as_nerve():
+    """Temperature must reach the muscle, not only the membrane.
+
+    An ectotherm in the cold has slower, weaker muscle too. With only the
+    neural Q10 wired up, cold merely stepped less often; it did not look
+    sluggish. The position actuators stand in for muscle, so their gain scales
+    with temperature - inverted, since warm muscle is faster while a warm
+    membrane time constant is shorter.
+    """
+    from env.loader import load_preset
+
+    gains, taus = {}, {}
+    for name in ("cold", "dry_land", "hot"):
+        preset = load_preset(name)
+        body = FlyBody(preset)
+        gains[name] = body.muscle_gain
+        taus[name] = preset.scaled_taus({"tau_m_ms": 20.0})["tau_m_ms"]
+        body.close()
+
+    assert gains["cold"] < gains["dry_land"] < gains["hot"], gains
+    assert taus["hot"] < taus["dry_land"] < taus["cold"], taus
+    # 25 C is the reference, so the baseline must be left exactly alone.
+    assert gains["dry_land"] == pytest.approx(20.0)
+    lo, hi = bs_clamp()
+    assert all(lo <= g <= hi for g in gains.values())
+
+
+def bs_clamp():
+    import body.sim as bs
+
+    return bs.MUSCLE_GAIN_CLAMP

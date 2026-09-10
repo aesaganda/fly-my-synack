@@ -14,6 +14,7 @@ import numpy as np
 
 from body.legs import LEG_ORDER
 from env.loader import EnvPreset, apply_physics
+from env.q10 import q10_factor
 
 # 7 actuated DoFs per leg, in the order flygym reports them:
 #   0 coxa yaw, 1 coxa pitch, 2 coxa roll,
@@ -94,6 +95,18 @@ SWIM_SWEEP_RAD = 2.5      # fore-aft sweep of the rowing stroke
 SWIM_FOLD_RAD = 1.8       # femur/tibia flexion during recovery, to cut drag
 SWIM_POWER_FRACTION = 0.35  # fraction of the cycle spent on the power stroke
 
+# Muscle kinetics are temperature-dependent too, not just neural ones. An
+# ectotherm in the cold has slower, weaker muscle as well as slower neurons, and
+# leaving that out made the cold preset merely step less often rather than look
+# sluggish. The position actuators stand in for muscle here, so their gain gets
+# the same Q10 treatment as the membrane time constants - inverted, because
+# warm muscle is FASTER while a warm membrane time constant is SHORTER.
+#
+# Clamped: below ~4 the fly cannot hold itself up and simply collapses, and
+# above ~40 the extra stiffness buys nothing. Both the reuse of the neural Q10
+# and these bounds are PLACEHOLDERS - muscle and membrane need not share a Q10.
+MUSCLE_GAIN_CLAMP = (4.0, 40.0)
+
 THORAX_SEGMENT = "c_thorax"
 FALL_HEIGHT_MM = 0.25   # thorax centre below this = collapsed onto the ground
 # A height check alone is blind to the failure that actually happens: the fly
@@ -101,6 +114,13 @@ FALL_HEIGHT_MM = 0.25   # thorax centre below this = collapsed onto the ground
 # orientation too.
 FALL_ROLL_DEG = 90.0
 FALL_PITCH_DEG = 75.0
+
+
+def mujoco_bias_affine() -> int:
+    """mjBIAS_AFFINE, which is what a position actuator uses."""
+    import mujoco
+
+    return int(mujoco.mjtBias.mjBIAS_AFFINE)
 
 
 class FlyBody:
@@ -167,6 +187,11 @@ class FlyBody:
         # Preset must be applied AFTER add_fly: add_fly overwrites <option> from
         # the fly's own mujoco_globals.yaml.
         self.swimming = False
+        self._kp_ref = actuator_gain
+        self._position_actuators = [
+            i for i in range(self.sim.mj_model.nu)
+            if self.sim.mj_model.actuator_biastype[i] == mujoco_bias_affine()
+        ]
         self.apply_preset(preset)
 
         # The renderer is created lazily on first use, NOT here: the GL context
@@ -195,6 +220,15 @@ class FlyBody:
         apply_physics(self.sim.mj_model, preset)
         self._wind = np.asarray([float(w) for w in preset.physics["wind"]])
         self.swimming = preset.locomotion == "swim"
+        self._apply_muscle_gain(preset)
+
+    def _apply_muscle_gain(self, preset: EnvPreset) -> None:
+        """Scale the position actuators' gain with temperature (see above)."""
+        factor = q10_factor(preset.temperature_c, float(preset.neural["q10"]))
+        self.muscle_gain = float(np.clip(self._kp_ref / factor, *MUSCLE_GAIN_CLAMP))
+        idx = self._position_actuators
+        self.sim.mj_model.actuator_gainprm[idx, 0] = self.muscle_gain
+        self.sim.mj_model.actuator_biasprm[idx, 1] = -self.muscle_gain
 
     # ---------- rendering ----------
 
