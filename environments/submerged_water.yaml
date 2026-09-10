@@ -60,3 +60,7 @@ sensory:
   # detector - is largely swamped underwater.
   mechanosensory_gain: 1.6
   johnstons_organ_gain: 0.3
+  # Airborne olfaction is essentially gone underwater - the antennae are
+  # flooded and there is no air to carry a volatile. Not zero, because
+  # contact chemoreception still exists. PLACEHOLDER.
+  olfactory_gain: 0.15

@@ -26,3 +26,5 @@ neural:
 sensory:
   mechanosensory_gain: 1.0     # reference condition, by definition
   johnstons_organ_gain: 1.0
+  # Reference condition, by definition.
+  olfactory_gain: 1.0

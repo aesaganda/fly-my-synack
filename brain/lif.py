@@ -16,6 +16,7 @@ from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
 import numpy as np
+import scipy.sparse as sp
 import torch
 
 from brain.tables import ConnectomeTables
@@ -79,6 +80,7 @@ class LIFNetwork:
         self._index_of = {int(b): i for i, b in enumerate(self.body_ids)}
 
         self.W = self._build_weights(tables)
+        self._rebuild_csr()
         self._alloc_state()
         self._recompute_decays()
 
@@ -105,6 +107,38 @@ class LIFNetwork:
         return torch.sparse_coo_tensor(
             idx, torch.from_numpy(vals).to(self.device), (self.n, self.n)
         ).coalesce()
+
+    def _rebuild_csr(self) -> None:
+        """Keep a SciPy CSR copy of W for the CPU path. See `_recurrent`."""
+        if self.device.type != "cpu":
+            self._csr = None
+            return
+        w = self.W.coalesce()
+        rows, cols = w.indices().cpu().numpy()
+        self._csr = sp.csr_matrix(
+            (w.values().cpu().numpy().astype(np.float32), (rows, cols)),
+            shape=(self.n, self.n),
+        )
+
+    def _recurrent(self) -> torch.Tensor:
+        """W @ spikes.
+
+        torch's CPU sparse matmul is startlingly slow at this size - measured
+        575 us for a 2,129 x 2,129 matrix with 60k non-zeros, which is the
+        single largest cost in the whole simulation, ahead of `mj_step`. SciPy
+        multiplies the identical matrix in 55 us and returns bit-identical
+        values (verified: max abs difference 0.0). Even torch's DENSE matvec is
+        faster than its sparse one here.
+
+        So the CPU path goes through SciPy and anything else stays on torch.
+        Splitting it this way rather than dropping torch keeps the CUDA path
+        that `--gpu` documents, and the big subsets (`vnc` at ~17k neurons,
+        `all` at ~176k) are where a device backend actually earns its keep.
+        """
+        if self._csr is None:
+            return torch.sparse.mm(self.W, self.spikes.float().unsqueeze(1)).squeeze(1)
+        # `spikes` is a CPU bool tensor, so .numpy() is a view, not a copy.
+        return torch.from_numpy(self._csr @ self.spikes.numpy().astype(np.float32))
 
     def _alloc_state(self) -> None:
         z = lambda: torch.zeros(self.n, device=self.device)  # noqa: E731
@@ -137,8 +171,7 @@ class LIFNetwork:
         """Advance one dt. `external` is an input current per neuron."""
         p = self.params
 
-        recurrent = torch.sparse.mm(self.W, self.spikes.float().unsqueeze(1)).squeeze(1)
-        self.i_syn = self.i_syn * self._decay_i + recurrent
+        self.i_syn = self.i_syn * self._decay_i + self._recurrent()
         drive = self.i_syn + p.tonic_drive
         if external is not None:
             drive = drive + external
@@ -201,3 +234,4 @@ class LIFNetwork:
         self.W = torch.sparse_coo_tensor(
             ck["W_indices"].to(self.device), ck["W_values"].to(self.device), (self.n, self.n)
         ).coalesce()
+        self._rebuild_csr()

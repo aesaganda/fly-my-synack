@@ -28,3 +28,7 @@ neural:
 sensory:
   mechanosensory_gain: 1.0
   johnstons_organ_gain: 1.0
+  # At 10 C food volatiles barely evaporate, so there is little to smell -
+  # which is why a cold fly in the kitchen world wanders rather than
+  # tracking. PLACEHOLDER magnitude.
+  olfactory_gain: 0.6

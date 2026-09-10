@@ -27,3 +27,6 @@ neural:
 sensory:
   mechanosensory_gain: 1.0
   johnstons_organ_gain: 1.0
+  # Volatility rises with temperature, so there is more odorant in the air
+  # at 35 C than at 25 C. PLACEHOLDER magnitude.
+  olfactory_gain: 1.15

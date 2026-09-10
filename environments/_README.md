@@ -37,6 +37,21 @@ Beyond the required ones, a preset may set:
 | `locomotion` | `walk` | `walk` (tripod gait, adhesion on) or `swim` (synchronous rowing, adhesion off). |
 | `stroke_freq_hz` | body default (18) | limb cycle frequency. Swimming wants a slower one. |
 
+## Optional sensory fields
+
+| field | default | meaning |
+|---|---|---|
+| `olfactory_gain` | 1.0 | how well the fly can smell here. Only does anything in a world that has odour sources — `--world kitchen`. |
+
+`olfactory_gain` is the environment's grip on the fly's *exploration*, the way
+`adhesion_gain` is its grip on the fly's *feet*. The `windy` preset cuts it to
+0.45 for a specific reason: the plume model in `body/world.py` is a still-air
+Gaussian, and wind does not merely translate a plume, it shreds it into
+filaments that a smooth spatial gradient does not describe. Lowering the gain
+says "the cue is unreliable here" instead of pretending the model still holds.
+`submerged_water` cuts it to 0.15 because airborne olfaction underwater is not
+a thing. All of these numbers are PLACEHOLDERS.
+
 ## Grip is not monotonic in humidity
 
 Insect tarsal attachment is maximal at INTERMEDIATE humidity. The adhesive pads
