@@ -97,7 +97,7 @@ flail.
 | `dry_land` | still air, ~20% RH | 25 °C | dried pads, weaker grip |
 | `humid_air` | near-saturated air | 25 °C | water film, weakest grip |
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
-| `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
+| `hot` | dry air | 35 °C | past the thermal optimum — frantic |
 | `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
 | `windy` | dry air, gusty 0→1.9 m/s | 25 °C | buffeted off course |
 
@@ -342,45 +342,37 @@ explicit about what that means:
 
   | metric | cold 15C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
   |---|---|---|---|---|---|---|---|
-  | net speed mm/s | **2.69** | **7.68** | 10.75 | **5.20** | **12.28** | 6.95 | **0.86** |
-  | slip ratio | 0.53 | 0.63 | 0.52 | **0.75** | 0.51 | 0.55 | n/a |
-  | straightness | 0.631 | 0.817 | 0.989 | 0.689 | 0.997 | **0.702** | **0.482** |
-  | tarsal grip | 200 | **120** | 200 | **80** | 200 | 200 | 0 (swimming) |
+  | net speed mm/s | **2.69** | 7.68 | **10.75** | 5.20 | **5.83** | 6.01 | **0.86** |
+  | leg speed mm/s | 9.4 | 21.4 | 22.5 | 20.7 | **29.0** | 24.6 | 3.1 |
+  | slip ratio | 0.71 | 0.63 | **0.52** | 0.75 | **0.80** | 0.72 | n/a |
+  | straightness | 0.631 | 0.817 | **0.989** | 0.689 | **0.435** | **0.489** | **0.482** |
 
-  Every preset does something distinct, for a different reason:
+  Every preset does something distinct, for a different reason - and two of the
+  axes turn out to be non-monotonic, so `temperate` is the best case on both:
 
-  * **Humidity is not monotonic.** Insect tarsal pads need some moisture to form
-    the capillary bridges that create grip, so bone-dry air weakens them; a
-    condensed film at saturation makes them slip, so wet air weakens them too.
-    Grip therefore PEAKS in the middle, and so does walking: 7.7 mm/s at ~20% RH,
-    10.8 at ~60%, 5.2 at ~90%. `temperate` is that optimum and is the reference
-    the others are read against. Dry air is not the fly's best case, which is
-    why `dry_land` is no longer the fastest preset.
-  * **Temperature** spans 4.6x in walking speed through two channels. Q10
-    shortens the membrane time constants, so leg motor pools fire faster
-    (35 / 70 / 123 Hz at 15 / 25 / 35 C) and the CPG steps quicker; the same Q10
-    scales the position actuators, which stand in for muscle. With only the
-    neural half, cold merely stepped less often while each step stayed crisp -
-    slow motion rather than sluggishness. Hot is limited by the BODY: above
-    ~22 Hz stride the actuators stop tracking.
+  * **Temperature peaks and then falls.** Ectotherm locomotor performance rises
+    to an optimum around 25-30 C and declines toward the critical thermal
+    maximum, and the two ends fail in opposite ways. **Cold** is sluggish: slow
+    membrane kinetics *and* weak muscle, so the legs barely move (9.4 mm/s) and
+    the fly sags and drags. **Hot** is frantic: Q10 drives the leg pools to
+    ~123 Hz against ~70 at 25 C, the network commands a ~29 Hz stride the
+    actuators cannot track, and the result is the most active preset by leg
+    speed (29.0) and one of the least effective by travel - 80% of the motion
+    is wasted and the path falls apart to 0.435. Fast nerves, failing muscle.
+  * **Humidity peaks and then falls** for a different reason: tarsal pads need
+    some moisture to form the capillary bridges that grip, so dry air weakens
+    them, while a condensed film at saturation makes them slip. 7.7 mm/s at
+    ~20% RH, 10.8 at ~60%, 5.2 at ~90%.
   * **Wind** gusts rather than blowing steadily, because a steady wind cannot
-    buffet the fly - it can only bias its path or delete it. Re-measured with
-    the current gait: 1.5 m/s bends the path, 2.0 rolls the fly onto its back
-    for good (it has no righting reflex), 2.5 lifts it ~28 mm and sweeps it
-    away. `windy` therefore swings between dead calm and ~1.9 m/s every ~3 s,
-    which drops straightness to 0.49 and rocks it to 43 deg of roll while it
-    stays on its feet. Only SLOW gusts work: at 1.5-2.5 Hz the oscillation
-    averages out and left the fly *faster and straighter* than steady wind.
+    buffet the fly - it can only bias its path or delete it (2.0 m/s capsizes it
+    permanently, 2.5 carries it away). Only slow gusts work: fast ones average
+    out and leave the fly *faster and straighter* than steady wind.
   * **Water** is a different mode of locomotion, not a slow walk: suspended
     (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
 
-  Note that none of the humidity presets touches drag. Humid air is very
-  slightly *lighter* than dry air, and the presets are asserted to stay within
-  2% of each other in density, so the effect cannot sneak in through the fluid
-  model. It is grip, and it is a closed-loop effect: driving the same body from
-  a fixed CPG with no brain, lower adhesion makes the fly slightly *faster*.
-  The slowdown appears only with the network in the loop, because less grip
-  changes the mechanical load the legs report and hence the descending drive.
+  Note that cold and hot are both slow, but for opposite reasons, and the leg
+  speed column separates them: 9.4 mm/s cold against 29.0 hot. Net speed alone
+  would make them look alike.
 
   Three numbers, three meanings. **Net speed** is displacement over elapsed time
   and is the honest walking speed. **Mean speed** averages instantaneous

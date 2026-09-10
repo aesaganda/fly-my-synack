@@ -302,3 +302,31 @@ def test_windy_gusts_actually_vary_the_wind():
     assert hi - lo > 1000.0, f"gusts too weak to buffet: {lo:.0f}..{hi:.0f}"
     # And must stay under the ~2 m/s speed that capsizes the fly outright.
     assert hi < 2000.0, f"gust peak {hi:.0f} would roll the fly onto its back"
+
+
+def test_hot_is_frantic_not_fast():
+    """35 C sits PAST the thermal optimum, so hot must not just be a quicker
+    version of temperate.
+
+    Ectotherm locomotor performance rises to an optimum around 25-30 C and then
+    declines. Here the Q10 speed-up outruns the body: the network commands a
+    stride the legs cannot track. The signature is high leg speed with poor
+    travel - the most active preset, not the most effective.
+    """
+    from session import Session
+
+    def run(name):
+        sess = Session(preset=name, connectome="synthetic", subset="motor",
+                       synthetic_size=3000, connectome_dir="/tmp/flysim-test", seed=0)
+        summary = sess.run(12000)
+        sess.body.close()
+        return summary
+
+    hot, mid = run("hot"), run("temperate")
+
+    # Legs working harder than at the optimum...
+    assert hot["mean_speed_mm_s"] > mid["mean_speed_mm_s"], "hot should be the more active"
+    # ...while more of that motion is wasted.
+    assert hot["slip_ratio"] > mid["slip_ratio"], (
+        f"slip {hot['slip_ratio']:.2f} hot vs {mid['slip_ratio']:.2f} temperate"
+    )

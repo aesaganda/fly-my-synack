@@ -1,5 +1,11 @@
 name: hot
-description: Dry air at 35C. Faster neural kinetics via Q10; slightly thinner air.
+description: >
+  Dry air at 35C - PAST the fly's thermal optimum, not simply a warmer version
+  of it. Ectotherm locomotor performance rises with temperature to an optimum
+  around 25-30C and then declines toward the critical thermal maximum. Here the
+  Q10 speed-up outruns the body: the network commands a ~29 Hz stride that the
+  legs cannot track, so the fly is the most ACTIVE preset by instantaneous leg
+  speed and among the least effective by distance covered. Frantic, not fast.
 units: mm_g_s
 
 physics:
@@ -10,7 +16,11 @@ physics:
   integrator: Euler
 
 neural:
-  temperature_c: 35.0    # Drosophila are ectotherms: neural kinetics track ambient T
+  # Drosophila are ectotherms: neural kinetics track ambient T. At 35 C the
+  # membrane time constants are ~2.3x shorter than at 25 C, which drives the
+  # leg motor pools to ~123 Hz against ~70 Hz at 25 C - faster than the muscle
+  # can usefully follow. See MAX_FORWARD_DRIVE in bridge/decode.py.
+  temperature_c: 35.0
   q10: 2.3               # PLACEHOLDER
   tau_clamp_ms: [2.0, 40.0]
 
