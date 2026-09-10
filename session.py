@@ -39,14 +39,44 @@ class RunMetrics:
         speeds = np.asarray(self.speeds) if self.speeds else np.zeros(1)
         traces = np.asarray(self.joint_traces) if self.joint_traces else np.zeros((1, 1))
         displacement = float(np.linalg.norm(path[-1] - path[0])) if len(path) > 1 else 0.0
-        travelled = float(np.linalg.norm(np.diff(path, axis=0), axis=1).sum()) if len(path) > 1 else 0.0
+        # Straightness is measured on a STRIDE-INDEPENDENT decimation of the
+        # path. `path` is sampled every 100 steps, which is ~1/6 of a stride, so
+        # measuring path length on it charges the fly for its own body sway and
+        # reports ~0.43 for a trajectory that is actually near-straight. Sampling
+        # roughly every 3 strides gives ~0.95 for the same run. Path length is
+        # not a sampling-rate-free quantity, so the interval has to be pinned.
+        # The decimation must KEEP THE LAST POINT, or the ratio below divides a
+        # full-length displacement by a short path length and reports a
+        # straightness above 1, which is geometrically impossible.
+        coarse = np.concatenate([path[::20], path[-1:]]) if len(path) > 40 else path
+        travelled = (
+            float(np.linalg.norm(np.diff(coarse, axis=0), axis=1).sum())
+            if len(coarse) > 1 else 0.0
+        )
+        coarse_displacement = (
+            float(np.linalg.norm(coarse[-1] - coarse[0])) if len(coarse) > 1 else 0.0
+        )
+        # Net speed is the honest walking speed. mean_speed_mm_s is the mean of
+        # instantaneous |velocity| and is inflated by per-step wobble; path
+        # length is worse still, since it grows with the sampling rate.
+        elapsed = self.steps * 1e-4
         return {
             "steps": self.steps,
+            "net_speed_mm_s": float(displacement / elapsed) if elapsed else 0.0,
             "mean_speed_mm_s": float(speeds.mean()),
+            # How much of the leg motion fails to become travel. High values
+            # mean the fly is stepping briskly and going nowhere - slipping -
+            # which is what low tarsal grip looks like.
+            "slip_ratio": (
+                float(1.0 - (displacement / elapsed) / speeds.mean())
+                if elapsed and speeds.mean() > 1e-9 else 0.0
+            ),
             "peak_speed_mm_s": float(speeds.max()),
             "net_displacement_mm": displacement,
             # 1.0 = perfectly straight; lower = more curved/wandering path.
-            "path_straightness": float(displacement / travelled) if travelled > 1e-9 else 0.0,
+            "path_straightness": (
+                min(1.0, float(coarse_displacement / travelled)) if travelled > 1e-9 else 0.0
+            ),
             "gait_regularity": float(np.mean(self.gait_regularity)) if self.gait_regularity else 0.0,
             # Std of each joint over time, averaged - a blunt "is it still moving
             # its legs" number that separates walking from flailing or freezing.
@@ -79,7 +109,8 @@ class Session:
         self.decoder = MotorDecoder(self.net)
         self.encoder = SensoryEncoder(self.net, self.decoder)
         self.body = FlyBody(self.preset, render=render, seed=seed)
-        self.cpg = TripodCPG(dt_s=self.body.timestep, seed=seed)
+        self._seed = seed
+        self.cpg = self._new_cpg()
 
         # The LIF runs on a coarser clock than the physics; stepping a spiking
         # net at 1e-4 s buys nothing and costs 10x.
@@ -93,19 +124,35 @@ class Session:
 
     # ---------- configuration ----------
 
+    def _new_cpg(self) -> TripodCPG:
+        # Swimming rows all six legs together; walking runs them as two tripods.
+        kwargs = {}
+        if self.preset.stroke_freq_hz is not None:
+            kwargs["base_freq_hz"] = self.preset.stroke_freq_hz
+        return TripodCPG(
+            dt_s=self.body.timestep, seed=self._seed,
+            synchronous=self.preset.locomotion == "swim",
+            **kwargs,
+        )
+
     def _params_for(self, preset: EnvPreset) -> LIFParams:
         return self.base_params.scaled(preset.scaled_taus(self.base_params.base_taus()))
 
     def switch_preset(self, name: str) -> None:
         """Change environment mid-run: physics options and neuron taus together."""
+        previous = self.preset.locomotion
         self.preset = load_preset(name)
         self.net.set_params(self._params_for(self.preset))
         self.body.apply_preset(self.preset)
+        if self.preset.locomotion != previous:
+            # Switching between walking and swimming changes the inter-leg
+            # coordination, so the oscillators have to be rebuilt.
+            self.cpg = self._new_cpg()
 
     def reset(self) -> None:
         self.net.reset()
         self.body.reset()
-        self.cpg = TripodCPG(dt_s=self.body.timestep)
+        self.cpg = self._new_cpg()
         self.step_count = 0
         self.metrics = RunMetrics()
 
@@ -127,7 +174,7 @@ class Session:
         obs = self.body.step(phase, amplitude)
 
         self._external = self.encoder.encode(
-            contact_forces=obs["contact_forces"],
+            leg_load=obs["leg_load"],
             air_speed=obs["air_speed"],
             mechanosensory_gain=float(self.preset.sensory["mechanosensory_gain"]),
             johnstons_organ_gain=float(self.preset.sensory["johnstons_organ_gain"]),
@@ -162,9 +209,10 @@ class Session:
         d = self._last_drive
         if d.stop or d.forward < 0.1:
             return "stopped"
+        gait = "swimming" if self.preset.locomotion == "swim" else "walking"
         if abs(d.turn) > 0.35:
-            return "turning-" + ("right" if d.turn > 0 else "left")
-        return "walking"
+            return f"{gait}-" + ("right" if d.turn > 0 else "left")
+        return gait
 
     def live_metrics(self) -> dict:
         d = self._last_drive

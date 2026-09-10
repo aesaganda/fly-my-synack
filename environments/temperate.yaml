@@ -1,0 +1,28 @@
+name: temperate
+description: >
+  Still air at 25C and ~60% RH - the humidity at which the fly grips best.
+  Insect tarsal attachment peaks at INTERMEDIATE humidity: the adhesive pads
+  need some moisture to form the capillary bridges that create grip, but a
+  condensed film on the surface makes them slip. This preset sits at that
+  optimum, so it is the reference the drier and wetter presets are measured
+  against.
+units: mm_g_s
+
+physics:
+  density: 1.181e-6      # air @25C, ~60% RH - between dry and saturated
+  viscosity: 1.84e-5
+  wind: [0.0, 0.0, 0.0]
+  gravity: [0.0, 0.0, -9810.0]
+  integrator: Euler
+  # Peak of the adhesion curve. dry_land sits below this on the dry side,
+  # humid_air below it on the wet side - see environments/_README.md.
+  adhesion_gain: 200.0
+
+neural:
+  temperature_c: 25.0
+  q10: 2.3               # PLACEHOLDER
+  tau_clamp_ms: [2.0, 40.0]
+
+sensory:
+  mechanosensory_gain: 1.0     # reference condition, by definition
+  johnstons_organ_gain: 1.0

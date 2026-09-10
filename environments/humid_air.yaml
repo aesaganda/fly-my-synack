@@ -1,15 +1,39 @@
 name: humid_air
 description: >
-  Warm, near-saturated air at 25C / ~90% RH. Physically this is barely
-  distinguishable from dry air - humid air is very slightly LESS dense than dry
-  air, because water vapour is lighter than N2/O2. The interesting effect here
-  is sensory, not mechanical, and the preset says so rather than inventing drag.
+  Warm, near-saturated air at 25C / ~90% RH. The air itself is barely
+  distinguishable from dry air - humid air is very slightly LESS dense, because
+  water vapour is lighter than N2/O2 - so the preset does not invent drag. What
+  changes is GRIP: near saturation a thin water film forms on the substrate and
+  the fly's tarsal adhesion drops, so it steps just as briskly but slips.
 units: mm_g_s
 
 physics:
   density: 1.177e-6      # moist air @25C, ~90% RH - marginally below dry air
   viscosity: 1.83e-5
   wind: [0.0, 0.0, 0.0]
+  # Reduced tarsal grip on a damp surface, against the 200 used on dry ground.
+  #
+  # The WET side of the adhesion curve, against temperate's optimum of 200.
+  # Attachment peaks at intermediate humidity: the pads need some moisture to
+  # form capillary bridges (so dry_land, at ~20% RH, also grips poorly) but a
+  # condensed film on the surface makes them slip. The non-monotonic shape is
+  # documented; the specific number is a PLACEHOLDER.
+  #
+  # NOTE this is a CLOSED-LOOP effect, not raw mechanics. Driving the same body
+  # from a fixed CPG with no brain, lower adhesion actually makes the fly
+  # slightly FASTER (11.7 against 11.2 mm/s over 40k steps). The slowdown comes
+  # from reduced grip changing the mechanical load the legs report, which
+  # changes the sensory drive and hence the descending command. With the brain
+  # in the loop it is robust across seeds: 10.64 +- 0.08 mm/s dry against
+  # 5.84 +- 0.20 humid, cleanly separated.
+  #
+  # Swept in-situ. The legs keep stepping at ~21 mm/s instantaneous while net
+  # progress falls:
+  #     200 -> 10.8 mm/s net, straightness 0.99
+  #      80 ->  6.1 mm/s net, straightness 0.78   <- chosen
+  #      40 ->  4.0 mm/s net, straightness 0.54
+  #      10 ->  0.9 mm/s net, the fly scrabbles and gets nowhere
+  adhesion_gain: 80.0
   gravity: [0.0, 0.0, -9810.0]
   integrator: Euler
 

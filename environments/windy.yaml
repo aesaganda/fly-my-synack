@@ -1,6 +1,6 @@
 name: windy
 description: >
-  Dry air at 25C with a steady 0.15 m/s lateral draught. NOTE: MuJoCo's `wind` is
+  Dry air at 25C with a steady 1.5 m/s wind - strong enough to shove the fly about. NOTE: MuJoCo's `wind` is
   subtracted from body velocity and the resulting force scales with density and
   viscosity - so wind with zero density would be a silent no-op. Density is
   nonzero here on purpose.
@@ -9,12 +9,21 @@ units: mm_g_s
 physics:
   density: 1.184e-6
   viscosity: 1.84e-5
-  # 0.15 m/s along +x, in mm/s. Deliberately a draught rather than a breeze:
-  # this model fly is only marginally stable, and a crosswind above roughly
-  # 0.25 m/s rolls it onto its back (measured: 250 mm/s capsizes it after ~18k
-  # steps, 500 mm/s after ~3.4k, 150 mm/s stays upright past 30k). Raise it if
-  # you want to study being blown over; keep it here to study walking in wind.
-  wind: [150.0, 0.0, 0.0]
+  # 1.5 m/s along +x, in mm/s. Strong enough to visibly shove the fly around:
+  # it stays on its feet and keeps walking, but the path bends hard (measured
+  # straightness 0.75 against 0.997 in still air) and it is pushed downwind.
+  #
+  # There is a cliff just above this. Measured with the current gait:
+  #     <= 1.9 m/s  stays grounded, ~2.6 feet down, |roll| under 17 deg
+  #        2.0 m/s  lifted ~12 mm off the floor and tumbles, blown 1.2 m downwind
+  #        3.0 m/s  swept away at ~1.6 m/s, gone
+  # 1.5 leaves margin below that. Raise it if you want to study being blown
+  # over rather than walking in wind.
+  #
+  # An earlier version of this preset sat at 0.15 m/s because the gait then was
+  # fragile enough to capsize at 0.25. The gait is much steadier now, so the
+  # wind no longer has to be a whisper.
+  wind: [1500.0, 0.0, 0.0]
   gravity: [0.0, 0.0, -9810.0]
   integrator: Euler
 

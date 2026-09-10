@@ -93,12 +93,13 @@ flail.
 
 | preset | medium | T | what changes |
 |---|---|---|---|
-| `dry_land` | still dry air | 25 °C | baseline |
-| `humid_air` | near-saturated air | 25 °C | sensory gains only (see note below) |
+| `temperate` | still air, ~60% RH | 25 °C | reference — best grip |
+| `dry_land` | still air, ~20% RH | 25 °C | dried pads, weaker grip |
+| `humid_air` | near-saturated air | 25 °C | water film, weakest grip |
 | `submerged_water` | water | 20 °C | ~1000× density, `implicitfast` integrator |
 | `hot` | dry air | 35 °C | faster neural kinetics (Q10) |
 | `cold` | dry air | 15 °C | slower neural kinetics (Q10) |
-| `windy` | dry air + 0.15 m/s | 25 °C | lateral draught |
+| `windy` | dry air + 1.5 m/s | 25 °C | strong lateral wind |
 
 ```bash
 python3 run.py --list-envs
@@ -114,7 +115,7 @@ million.**
 |---|---|---|---|---|
 | `density` | g/mm³ | `1.184e-6` | `9.98e-4` | ×1e-6 |
 | `viscosity` | g/(mm·s) | `1.84e-5` | `1.002e-3` | ×1 (unchanged) |
-| `wind` | mm/s | `150` = 0.15 m/s | — | ×1e3 |
+| `wind` | mm/s | `1500` = 1.5 m/s | — | ×1e3 |
 | `gravity` | mm/s² | `-9810` | | ×1e3 |
 
 Every preset declares `units: mm_g_s` and the loader rejects anything else.
@@ -204,16 +205,21 @@ docker compose run --rm sim python3 -m brain.sources.feather --schema /data/conn
 
 | | |
 |---|---|
-| **Fluid as density/viscosity** | MuJoCo's medium model, not CFD. Gives buoyancy and quadratic drag on body-sized shapes; there is no free surface, no wake, no wetting. "Submerged" means "immersed in a dense medium". |
+| **Fluid as density/viscosity** | MuJoCo's medium model, not CFD. Quadratic drag on body-sized shapes; no free surface, no wake, no wetting. "Submerged" means "immersed in a dense medium". |
+| **Buoyancy** | MuJoCo's fluid model provides drag and lift but **no buoyancy** — verified: a sphere with exactly the medium's density still sinks. Buoyancy is therefore folded into an effective gravity in the preset (−300 rather than −9810), which is a stand-in, not a force balance. |
+| **Swimming** | Thrust is pure drag asymmetry: fast power stroke with the legs spread, slow recovery with them folded. Measured in open water — the asymmetric stroke moves the fly, a symmetric one gives ~0.005 mm/s, i.e. nothing. At 0.6 mm/s it is ~18x slower than walking, which is not a tuning failure: a millimetre-scale body in water sits at Reynolds ~1–10, where viscosity dominates and rowing is a poor way to travel. Real adult *Drosophila* are bad swimmers. Enabling MuJoCo's per-geom ellipsoid fluid model on the legs was tried and made it *worse* (0.17 vs 0.67 mm/s), since it disables the inertia-box model for those bodies. |
 | **Q10 = 2.3** | A **placeholder**, not a sourced constant. Drosophila are ectotherms and neural kinetics do scale with temperature, but the specific coefficient here is uncalibrated and depends on which process you mean. Fit it before using it. |
+| **Muscle Q10** | The position actuators stand in for muscle and their gain is scaled by the *same* Q10 as the membrane, inverted (warm muscle is faster; a warm membrane time constant is shorter). Muscle and membrane need not share a coefficient — this reuse is a placeholder. The gain is clamped to [4, 40]: below ~4 the fly cannot hold itself up, above ~40 the stiffness buys nothing. |
 | **`tau_clamp_ms`** | An integrator guard rail, not biology. |
 | **Locomotion is CPG-generated** | The gait comes from six coupled oscillators. The connectome steers; it does not walk. |
 | **Rate → drive mapping** | `tanh(rate / REFERENCE_RATE_HZ)` with hand-picked reference rates. A heuristic. |
 | **Tonic drive (1.05)** | With `--neuron-subset motor` everything upstream of the DNs is missing, so nothing would reach threshold. A constant background current stands in for the absent network. |
 | **Sensory encoding** | Contact force is injected into each leg's *motor* pool as a proprioceptive stand-in; a scalar air-motion term stands in for Johnston's organ. Real `vnc_sensory` neurons are used when the loaded subset contains them. Anatomically crude either way. |
 | **Sensory gains per preset** | Reasoned, not measured. Humidity and immersion plausibly change mechanosensory and antennal input; the numbers are invented. |
-| **Gait joint amplitudes** | Chosen by a sweep for forward travel *and* postural stability. Real flies walk ~10–20 mm/s; this gait manages ~5–7 mm/s. |
-| **Postural margin** | The model fly is only marginally stable. A crosswind above ~0.25 m/s rolls it onto its back, so `windy` is set to a 0.15 m/s draught. Per-leg drive is limited to ±25% for the same reason. |
+| **Humidity → tarsal grip** | Insect tarsal adhesion genuinely is humidity-dependent, but the direction is regime-dependent and the literature is mixed: moderate humidity can *increase* attachment through capillary bridges at the pad, while a condensed film on the surface reduces it. This preset takes the wet-film case. The mechanism is real; the number (80 against 200) is a placeholder. |
+| **Gait joint amplitudes** | Chosen by sweeping speed *and* postural stability together across coxa sweep, tibia sweep, lift, duty factor, stride frequency, actuator gain and adhesion. Reaches ~10 mm/s, the bottom of a real fly's ~10-20 mm/s, but the coxa excursion (2.6 rad ≈ 149°) is far beyond anything physiological. It moves the model convincingly; it is not measured Drosophila kinematics. |
+| **Leg adhesion gain** | 200, against MuJoCo's default of 1.0. Without it the foot slips through stance and a stride delivers a fraction of the travel its geometry implies — this single parameter was worth about 3x in speed. Above ~400 the foot sticks hard enough to pull the fly off a straight line. |
+| **Postural margin** | `windy` runs at 1.5 m/s, which visibly shoves the fly without knocking it over. At 2.0 m/s it is lifted off the floor and tumbles away — a cliff, not a gradient. Per-leg drive is limited to ±5%, which is what keeps the path straight. |
 | **Unknown neurotransmitters** | ~12k neurons have `unclear`/null `consensusNt` and are treated as excitatory, following the base rate. |
 | **`humid_air` physics** | Humid air is very slightly *less* dense than dry air. The preset says so rather than inventing drag; its real effect is on the sensory gains. |
 
@@ -333,19 +339,60 @@ explicit about what that means:
   (3 s of simulated time) — verified on body roll/pitch, not just height.
 - `--compare-envs` on real connectome data, 30,000 steps each:
 
-  | metric | dry_land | submerged_water | windy | hot | cold |
-  |---|---|---|---|---|---|
-  | mean speed mm/s | 6.90 | **5.31** | 6.40 | 6.76 | 6.93 |
-  | peak speed mm/s | 25.5 | **16.1** | 36.2 | 45.7 | 38.6 |
-  | displacement mm | 6.70 | 5.80 | 4.48 | 5.00 | 6.18 |
-  | fell over | no | no | no | no | no |
+  | metric | cold 15C | dry_land | temperate | humid_air | hot 35C | windy | submerged |
+  |---|---|---|---|---|---|---|---|
+  | net speed mm/s | **2.69** | **7.68** | 10.75 | **5.20** | **12.28** | 6.95 | **0.86** |
+  | slip ratio | 0.53 | 0.63 | 0.52 | **0.75** | 0.51 | 0.55 | n/a |
+  | straightness | 0.631 | 0.817 | 0.989 | 0.689 | 0.997 | **0.702** | **0.482** |
+  | tarsal grip | 200 | **120** | 200 | **80** | 200 | 200 | 0 (swimming) |
 
-  Water costs ~23% of mean speed and ~37% of peak speed — the drag signature.
-  Sensory current in water is ~1.7x that on dry land, matching its
-  `mechanosensory_gain: 1.6`.
+  Every preset does something distinct, for a different reason:
+
+  * **Humidity is not monotonic.** Insect tarsal pads need some moisture to form
+    the capillary bridges that create grip, so bone-dry air weakens them; a
+    condensed film at saturation makes them slip, so wet air weakens them too.
+    Grip therefore PEAKS in the middle, and so does walking: 7.7 mm/s at ~20% RH,
+    10.8 at ~60%, 5.2 at ~90%. `temperate` is that optimum and is the reference
+    the others are read against. Dry air is not the fly's best case, which is
+    why `dry_land` is no longer the fastest preset.
+  * **Temperature** spans 4.6x in walking speed through two channels. Q10
+    shortens the membrane time constants, so leg motor pools fire faster
+    (35 / 70 / 123 Hz at 15 / 25 / 35 C) and the CPG steps quicker; the same Q10
+    scales the position actuators, which stand in for muscle. With only the
+    neural half, cold merely stepped less often while each step stayed crisp -
+    slow motion rather than sluggishness. Hot is limited by the BODY: above
+    ~22 Hz stride the actuators stop tracking.
+  * **Wind** at 1.5 m/s shoves the fly off its heading while gusting it to
+    78 mm/s peak, far faster than it can walk.
+  * **Water** is a different mode of locomotion, not a slow walk: suspended
+    (0.2 feet touching against 2.7 on land), rowing all six legs in synchrony.
+
+  Note that none of the humidity presets touches drag. Humid air is very
+  slightly *lighter* than dry air, and the presets are asserted to stay within
+  2% of each other in density, so the effect cannot sneak in through the fluid
+  model. It is grip, and it is a closed-loop effect: driving the same body from
+  a fixed CPG with no brain, lower adhesion makes the fly slightly *faster*.
+  The slowdown appears only with the network in the loop, because less grip
+  changes the mechanical load the legs report and hence the descending drive.
+
+  Three numbers, three meanings. **Net speed** is displacement over elapsed time
+  and is the honest walking speed. **Mean speed** averages instantaneous
+  |velocity| and is inflated by per-stride body sway. **Straightness** is
+  measured on a stride-independent decimation of the path: sampled faster than
+  one stride it charges the fly for its own sway and reports ~0.43 for a
+  trajectory that is actually near-straight. Path length is not a
+  sampling-rate-free quantity, so any "mm/s along the path" figure should be
+  distrusted - including one quoted earlier in this project's history, before
+  the interval was pinned.
+
 - The web UI: WebSocket frame streaming, preset switching, DN override, and
   pause/resume/reset all confirmed against a running server.
 - `Dockerfile.offline` builds and its tests pass inside the container.
+- `Dockerfile` (the non-offline one) builds and runs on an unrestricted
+  network: `docker build .` completes, and the built image fetched a real
+  connectome from neuPrint during the data-fetch stage (2,129 neurons, 104,411
+  edges) and ran `run.py --list-envs` correctly. Not re-run under `pytest`
+  inside this container specifically.
 
 ### A failure worth recording
 
@@ -375,10 +422,6 @@ model capsizes.
 - **The Feather path.** `storage.googleapis.com` is blocked on the development
   network, so the bulk files were never downloaded and their column names were
   never confirmed. Run the `--schema` command above before trusting it.
-- **`Dockerfile` (the non-offline one).** `apt` could not reach Debian mirrors
-  from containers on this network, so the standard build was never completed
-  here. It is the conventional recipe and should work on an unrestricted
-  network, but it is unproven.
 
 ---
 

@@ -14,6 +14,7 @@ import numpy as np
 
 from body.legs import LEG_ORDER
 from env.loader import EnvPreset, apply_physics
+from env.q10 import q10_factor
 
 # 7 actuated DoFs per leg, in the order flygym reports them:
 #   0 coxa yaw, 1 coxa pitch, 2 coxa roll,
@@ -21,31 +22,90 @@ from env.loader import EnvPreset, apply_physics
 DOFS_PER_LEG = 7
 COXA_PITCH, FEMUR_PITCH, TIBIA_PITCH, TARSUS_PITCH = 1, 3, 5, 6
 
-# The step cycle.
+# The step cycle, derived from the model's measured foot Jacobian rather than
+# guessed. Displacement of the front-left foot relative to the thorax, per
+# +0.5 rad on each joint (mm):
 #
-# Fore-aft foot position follows sin(phase). The leg EXTENDS (femur/tibia/tarsus
-# pitch up) over the half-cycle where cos(phase) > 0, and that extension is what
-# presses the foot into the ground - so that half-cycle is STANCE, and adhesion
-# must be on for it. Defining stance as the other half (cos <= 0) leaves the leg
-# extending into the ground with no adhesion, which levers the body upward: the
-# fly rears monotonically (pitch climbing past +50 deg) and eventually capsizes
-# onto its back. That failure only appears at the low stride frequencies the
-# brain actually commands, which is why a fast open-loop test does not catch it.
-# Sign is negative because the coxa pitch axis is mirrored left-to-right
-# (NeuroMechFly is built with mirror_left2right=True); with +sin the two sides
-# push against each other and the fly rotates on the spot instead of walking.
-# Verified empirically: +sin gives 0.2 mm of travel per second, -sin gives 4 mm.
-# -0.6 rather than a larger stride: swept against travel AND stability, a
-# bigger protraction pitches the body enough that the fly eventually capsizes
-# once the brain starts modulating the legs asymmetrically. -0.6 travels
-# further (6.7 mm/s vs 1.5) and keeps a margin against tipping.
-PROTRACTION_RAD = -0.6   # coxa fore-aft amplitude
-EXTEND_FEMUR_RAD = 0.6   # femur extension during stance
-EXTEND_TIBIA_RAD = 0.8   # tibia extension during stance
-EXTEND_TARSUS_RAD = 0.3
-# PLACEHOLDER amplitudes: picked by a coarse sweep for net forward travel, not
-# fitted to recorded Drosophila kinematics. Real flies walk ~10-20 mm/s; this
-# gait manages ~4 mm/s, so it locomotes but is not a quantitative match.
+#     joint          fore/aft      height
+#     coxa  pitch +   +0.116       -0.089     -> protracts the foot
+#     femur pitch +   -0.195       -0.467     -> drives the foot DOWN
+#     femur pitch -   -0.024       +0.312     -> lifts the foot
+#     tibia pitch +   -0.287       -0.268     -> retracts the foot, strongly
+#
+# So fore-aft travel comes from coxa AND tibia together, and the femur is the
+# lift. phase 0 = foot fully forward and planted; stance is sin(phase) >= 0,
+# over which the coxa retracts and the tibia extends, carrying the foot
+# backwards and the body forwards. During swing the femur flexes to lift the
+# foot clear.
+#
+# Two earlier versions of this were wrong in instructive ways: clipping the
+# extension to max(0, cos) left the swing leg sitting at its neutral STANDING
+# pose, so it dragged along the ground and cancelled the stance legs' thrust;
+# and defining stance as the other half-cycle made the leg extend into the
+# ground with adhesion off, levering the fly onto its back.
+# NeuroMechFly is built with mirror_left2right=True, so the left and right leg
+# joint axes point in opposite directions and the same joint offset sweeps the
+# two sides opposite ways. Without this sign the fly walks in a circle: yaw
+# drifts about -345 deg over 30k steps (a ~3.5 mm radius). With it, the drift
+# falls to roughly +26 deg over 20k steps and forward speed nearly doubles.
+SIDE_SIGN = np.array([1.0 if leg.startswith("L") else -1.0 for leg in LEG_ORDER])
+
+# The tibia carries the fore-aft sweep together with the coxa, but its effect
+# REVERSES between leg pairs. Measured foot travel per +0.5 rad of tibia pitch:
+#     front  dx = -0.275   (foot moves backward)
+#     mid    dx = -0.094
+#     hind   dx = +0.234   (foot moves FORWARD)
+# so it needs a per-pair sign; a single tibia term propels the front legs while
+# fighting the hind ones, which shows up as a ~30 deg nose-up pitch bias. With
+# the sign right the tibia is worth having twice over: it lengthens the stride,
+# and because tibia pitch also moves the foot vertically it partly cancels the
+# height change the coxa sweep causes - so the fly goes FASTER and nods LESS
+# than with the coxa alone (11.2 mm/s at 7.1 deg pitch sd, against 3.0 mm/s at
+# 11.6 deg).
+TIBIA_POS_SIGN = np.array([1.0 if leg[1] in "FM" else -1.0 for leg in LEG_ORDER])
+
+COXA_SWING_RAD = 2.6     # fore-aft sweep at the thorax-coxa joint
+TIBIA_SWING_RAD = 2.4    # tibia's share of the same sweep (per-pair sign)
+FEMUR_LIFT_RAD = 1.2     # femur flexion lifting the foot during swing
+
+# Fraction of the cycle a leg spends in stance. At 0.5 (a pure sinusoid) the two
+# tripods hand over instantaneously and, because the stance legs are themselves
+# moving, the fly ends up with fewer than three feet down 65% of the time - it
+# bounces rather than walks, nodding +/-20 deg every stride. Above 0.5 the
+# tripods overlap, which restores real support. Insects likewise use a duty
+# factor above 0.5 at walking speeds.
+DUTY_FACTOR = 0.65
+# PLACEHOLDER amplitudes: chosen by a sweep against forward speed AND postural
+# stability. This gait tops out around 6 mm/s in a straight line, against the
+# 10-20 mm/s a real fly walks, and the coxa excursion is larger than a real
+# fly's. It moves the model convincingly; it is not a reproduction of measured
+# Drosophila kinematics.
+
+# Swimming stroke. Nothing to push against, so thrust comes purely from drag
+# asymmetry: a fast power stroke with the legs spread, then a slow recovery with
+# them folded in. Verified in open water with the fly suspended clear of the
+# floor - the asymmetric stroke gives ~0.7 mm/s while a symmetric, unfolded one
+# gives 0.005, i.e. essentially nothing. That is the whole propulsive mechanism.
+#
+# It is slow, and honestly so: a millimetre-scale body rowing in water sits at a
+# Reynolds number of order 1-10, where viscosity dominates and rowing is a poor
+# way to travel. Real adult Drosophila are bad swimmers too. Do not expect
+# walking speeds here.
+SWIM_SWEEP_RAD = 2.5      # fore-aft sweep of the rowing stroke
+SWIM_FOLD_RAD = 1.8       # femur/tibia flexion during recovery, to cut drag
+SWIM_POWER_FRACTION = 0.35  # fraction of the cycle spent on the power stroke
+
+# Muscle kinetics are temperature-dependent too, not just neural ones. An
+# ectotherm in the cold has slower, weaker muscle as well as slower neurons, and
+# leaving that out made the cold preset merely step less often rather than look
+# sluggish. The position actuators stand in for muscle here, so their gain gets
+# the same Q10 treatment as the membrane time constants - inverted, because
+# warm muscle is FASTER while a warm membrane time constant is SHORTER.
+#
+# Clamped: below ~4 the fly cannot hold itself up and simply collapses, and
+# above ~40 the extra stiffness buys nothing. Both the reuse of the neural Q10
+# and these bounds are PLACEHOLDERS - muscle and membrane need not share a Q10.
+MUSCLE_GAIN_CLAMP = (4.0, 40.0)
 
 THORAX_SEGMENT = "c_thorax"
 FALL_HEIGHT_MM = 0.25   # thorax centre below this = collapsed onto the ground
@@ -56,6 +116,13 @@ FALL_ROLL_DEG = 90.0
 FALL_PITCH_DEG = 75.0
 
 
+def mujoco_bias_affine() -> int:
+    """mjBIAS_AFFINE, which is what a position actuator uses."""
+    import mujoco
+
+    return int(mujoco.mjtBias.mjBIAS_AFFINE)
+
+
 class FlyBody:
     def __init__(
         self,
@@ -63,6 +130,7 @@ class FlyBody:
         render: bool = False,
         seed: int = 0,
         actuator_gain: float = 20.0,
+        adhesion_gain: float = 200.0,
         camera_res: tuple[int, int] = (360, 480),
     ) -> None:
         # Imported here so `import body.legs` stays cheap and flygym-free.
@@ -86,7 +154,11 @@ class FlyBody:
         self.fly.add_actuators(
             dofs, actuator_type=ActuatorType.POSITION, kp=actuator_gain, neutral_input=neutral
         )
-        self.fly.add_leg_adhesion()
+        # Far stronger than the default 1.0: the foot otherwise slips during
+        # stance and a stride delivers a fraction of the travel its geometry
+        # implies. Sweeping this was worth ~3x in speed. Beyond ~400 the foot
+        # sticks hard enough to drag the fly off a straight line.
+        self.fly.add_leg_adhesion(gain=adhesion_gain)
         self._camera = self.fly.add_tracking_camera() if render else None
 
         world = FlatGroundWorld()
@@ -114,6 +186,17 @@ class FlyBody:
 
         # Preset must be applied AFTER add_fly: add_fly overwrites <option> from
         # the fly's own mujoco_globals.yaml.
+        self.swimming = False
+        self._kp_ref = actuator_gain
+        self._adhesion_ref = adhesion_gain
+        self._adhesion_actuators = [
+            i for i in range(self.sim.mj_model.nu)
+            if self.sim.mj_model.actuator_biastype[i] != mujoco_bias_affine()
+        ]
+        self._position_actuators = [
+            i for i in range(self.sim.mj_model.nu)
+            if self.sim.mj_model.actuator_biastype[i] == mujoco_bias_affine()
+        ]
         self.apply_preset(preset)
 
         # The renderer is created lazily on first use, NOT here: the GL context
@@ -141,6 +224,25 @@ class FlyBody:
         self.preset = preset
         apply_physics(self.sim.mj_model, preset)
         self._wind = np.asarray([float(w) for w in preset.physics["wind"]])
+        self.swimming = preset.locomotion == "swim"
+        self._apply_adhesion(preset)
+        self._apply_muscle_gain(preset)
+
+    def _apply_adhesion(self, preset: EnvPreset) -> None:
+        """Set tarsal grip from the preset (see EnvPreset.adhesion_gain)."""
+        gain = preset.adhesion_gain
+        self.adhesion_gain = self._adhesion_ref if gain is None else float(gain)
+        idx = self._adhesion_actuators
+        if idx:
+            self.sim.mj_model.actuator_gainprm[idx, 0] = self.adhesion_gain
+
+    def _apply_muscle_gain(self, preset: EnvPreset) -> None:
+        """Scale the position actuators' gain with temperature (see above)."""
+        factor = q10_factor(preset.temperature_c, float(preset.neural["q10"]))
+        self.muscle_gain = float(np.clip(self._kp_ref / factor, *MUSCLE_GAIN_CLAMP))
+        idx = self._position_actuators
+        self.sim.mj_model.actuator_gainprm[idx, 0] = self.muscle_gain
+        self.sim.mj_model.actuator_biasprm[idx, 1] = -self.muscle_gain
 
     # ---------- rendering ----------
 
@@ -181,18 +283,57 @@ class FlyBody:
         return float(roll), float(pitch)
 
     @staticmethod
-    def stance_mask(phase: np.ndarray) -> np.ndarray:
-        """True where the foot is planted and pushing (the extension half-cycle)."""
-        return np.cos(phase) >= 0.0
+    def _cycle(phase: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Split the cycle into stance and swing at DUTY_FACTOR.
+
+        Returns (sweep, lift, is_stance). `sweep` runs +1 -> -1 across stance
+        (carrying the planted foot backwards, driving the body forwards) and
+        back over the shorter swing; `lift` is a half-sine confined to swing.
+        """
+        u = (phase / (2 * np.pi)) % 1.0
+        stance = u < DUTY_FACTOR
+        frac = np.where(stance, u / DUTY_FACTOR, (u - DUTY_FACTOR) / (1.0 - DUTY_FACTOR))
+        sweep = np.where(stance, np.cos(np.pi * frac), -np.cos(np.pi * frac))
+        lift = np.where(stance, 0.0, np.sin(np.pi * frac))
+        return sweep, lift, stance
+
+    @classmethod
+    def stance_mask(cls, phase: np.ndarray) -> np.ndarray:
+        """True where the foot is planted and pushing."""
+        return cls._cycle(phase)[2]
+
+    def _swim_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
+        """Rowing stroke: sweep the legs back fast, fold them, bring them forward."""
+        u = (phase / (2 * np.pi)) % 1.0
+        power = u < SWIM_POWER_FRACTION
+        frac = np.where(
+            power, u / SWIM_POWER_FRACTION,
+            (u - SWIM_POWER_FRACTION) / (1.0 - SWIM_POWER_FRACTION),
+        )
+        stroke = np.where(power, np.cos(np.pi * frac), -np.cos(np.pi * frac))
+        fold = np.where(power, 0.0, -SWIM_FOLD_RAD)
+
+        offsets = np.zeros((len(phase), DOFS_PER_LEG))
+        offsets[:, COXA_PITCH] = SWIM_SWEEP_RAD * stroke * SIDE_SIGN
+        offsets[:, FEMUR_PITCH] = fold
+        offsets[:, TIBIA_PITCH] = fold
+        offsets *= amplitude[:, None]
+        return self.neutral_angles + offsets.reshape(-1)
 
     def joint_targets(self, phase: np.ndarray, amplitude: np.ndarray) -> np.ndarray:
         """Turn six leg phases into 42 joint-angle targets."""
+        if self.swimming:
+            return self._swim_targets(phase, amplitude)
         offsets = np.zeros((len(phase), DOFS_PER_LEG))
-        extend = np.maximum(0.0, np.cos(phase))  # nonzero only during stance
-        offsets[:, COXA_PITCH] = PROTRACTION_RAD * np.sin(phase)
-        offsets[:, FEMUR_PITCH] = EXTEND_FEMUR_RAD * extend
-        offsets[:, TIBIA_PITCH] = EXTEND_TIBIA_RAD * extend
-        offsets[:, TARSUS_PITCH] = EXTEND_TARSUS_RAD * extend
+        sweep, lift, _ = self._cycle(phase)
+        offsets[:, COXA_PITCH] = COXA_SWING_RAD * sweep * SIDE_SIGN
+        offsets[:, TIBIA_PITCH] = (
+            -TIBIA_SWING_RAD * sweep * SIDE_SIGN * TIBIA_POS_SIGN
+            - 0.5 * FEMUR_LIFT_RAD * lift
+        )
+        # The femur lift is NOT mirrored: "up" is the same direction on both
+        # sides, so flexing it needs the same sign left and right.
+        offsets[:, FEMUR_PITCH] = -FEMUR_LIFT_RAD * lift
         offsets *= amplitude[:, None]
         return self.neutral_angles + offsets.reshape(-1)
 
@@ -201,12 +342,27 @@ class FlyBody:
             self.name, self._ActuatorType.POSITION, self.joint_targets(phase, amplitude)
         )
         # Adhesion on during stance, off during swing - otherwise the fly drags
-        # its feet and cannot lift them.
-        self.sim.set_leg_adhesion_states(self.name, self.stance_mask(phase).astype(float))
+        # its feet and cannot lift them. Swimming has nothing to grip, so it is
+        # off entirely; leaving it on lets the fly haul itself along the floor,
+        # which is exactly the walking-underwater look this mode replaces.
+        adhesion = (
+            np.zeros(6) if self.swimming else self.stance_mask(phase).astype(float)
+        )
+        self.sim.set_leg_adhesion_states(self.name, adhesion)
 
         self.sim.step()
 
         contact_found, contact_forces, *_ = self.sim.get_ground_contact_info(self.name)
+        # Per-leg mechanical load. Ground reaction alone is useless when
+        # swimming - measured 0.01 per leg underwater against 85.9 on land -
+        # because there is nothing to push on. Actuator effort is ~57 per leg in
+        # BOTH media, since underwater the legs are working against fluid drag
+        # instead. Real proprioceptors sense limb load, not specifically ground
+        # contact, so summing the two gives a signal that survives both modes.
+        actuator_force = np.abs(
+            np.asarray(self.sim.get_actuator_forces(self.name, self._ActuatorType.POSITION))
+        ).reshape(len(LEG_ORDER), DOFS_PER_LEG).sum(axis=1)
+        contact_magnitude = np.linalg.norm(np.asarray(contact_forces), axis=1)
         pos = self._thorax_position()
         velocity = (pos - self._prev_pos) / self.timestep if self._prev_pos is not None else np.zeros(3)
         self._prev_pos = pos
@@ -216,16 +372,25 @@ class FlyBody:
         return {
             "position": pos,
             "speed": self.last_speed,
-            "contact_forces": np.linalg.norm(np.asarray(contact_forces), axis=1),
+            "contact_forces": contact_magnitude,
+            "leg_load": contact_magnitude + actuator_force,
             "contact_found": np.asarray(contact_found) > 0,  # float sensor, not a bool
             "air_speed": float(np.linalg.norm(velocity - self._wind)),
             "joint_angles": np.asarray(self.sim.get_joint_angles(self.name)),
             "roll_deg": roll,
             "pitch_deg": pitch,
-            "fell_over": bool(
-                pos[2] < FALL_HEIGHT_MM
-                or abs(roll) > FALL_ROLL_DEG
-                or abs(pitch) > FALL_PITCH_DEG
+            # "Fell over" is a walking concept: it means the gait collapsed and
+            # the animal is on its back or its belly. A swimming fly is
+            # suspended in fluid with no feet down, and pitching or rolling is
+            # ordinary behaviour there, not failure - so the check is not
+            # applied in swim mode rather than firing spuriously.
+            "fell_over": (
+                False if self.swimming
+                else bool(
+                    pos[2] < FALL_HEIGHT_MM
+                    or abs(roll) > FALL_ROLL_DEG
+                    or abs(pitch) > FALL_PITCH_DEG
+                )
             ),
         }
 

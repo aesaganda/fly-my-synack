@@ -111,3 +111,31 @@ def test_checkpoint_rejects_mismatched_neuron_set(tables, tmp_path):
     LIFNetwork(apply_subset(tables, "motor"), seed=0).save(ckpt)
     with pytest.raises(ValueError, match="different neuron set"):
         LIFNetwork(apply_subset(tables, "vnc"), seed=0).load_weights(ckpt)
+
+
+def test_checkpoint_does_not_overwrite_preset_temperature(tables, tmp_path):
+    """Loading a brain snapshot must not carry its Q10-scaled taus with it.
+
+    --compare-envs saves one snapshot and replays it under every preset. When
+    load_weights also restored LIFParams, every preset inherited the FIRST
+    preset's temperature, so hot and cold produced identical behaviour - the
+    comparison silently measured nothing.
+    """
+    from env.loader import load_preset
+
+    sub = apply_subset(tables, "motor")
+    base = LIFParams()
+
+    cold_p = load_preset("cold")
+    cold = LIFNetwork(sub, base.scaled(cold_p.scaled_taus(base.base_taus())), seed=0)
+    ckpt = tmp_path / "cold.pt"
+    cold.save(ckpt)
+
+    hot_p = load_preset("hot")
+    hot = LIFNetwork(sub, base.scaled(hot_p.scaled_taus(base.base_taus())), seed=0)
+    hot_tau = hot.params.tau_m_ms
+    assert hot_tau < cold.params.tau_m_ms
+
+    hot.load_weights(ckpt)
+    assert hot.params.tau_m_ms == hot_tau, "checkpoint overwrote the preset's temperature"
+    assert torch.allclose(hot.W.to_dense(), cold.W.to_dense()), "weights should be shared"

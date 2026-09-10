@@ -96,3 +96,172 @@ def test_wind_displaces_the_fly():
     still = _run("dry_land")
     windy = _run("windy")
     assert not np.allclose(still["angles"], windy["angles"])
+
+
+def test_submerged_swims_rather_than_walking():
+    """The submerged preset must be a different mode of locomotion, not a
+    slower walk: legs rowing in synchrony, feet off the floor, no adhesion."""
+    from env.loader import load_preset
+
+    water = load_preset("submerged_water")
+    land = load_preset("dry_land")
+    assert water.locomotion == "swim"
+    assert land.locomotion == "walk"
+
+    body = FlyBody(water)
+    assert body.swimming
+    # Buoyancy is folded into effective gravity; MuJoCo's fluid model has none.
+    assert abs(float(water.physics["gravity"][2])) < abs(float(land.physics["gravity"][2]))
+
+    cpg = TripodCPG(dt_s=body.timestep, seed=0, synchronous=True)
+    contacts = []
+    for i in range(6000):
+        phase, amplitude = cpg.step(forward=1.0, turn=0.0, per_leg_gain=np.ones(6))
+        obs = body.step(phase, amplitude)
+        if i > 2000:
+            contacts.append(int(obs["contact_found"].sum()))
+    body.close()
+
+    # A walking fly holds ~3 feet down; a swimming one should mostly be clear.
+    assert np.mean(contacts) < 1.5, f"still standing on the floor ({np.mean(contacts):.2f} feet down)"
+
+
+def test_swim_thrust_needs_an_asymmetric_stroke():
+    """Thrust comes from drag asymmetry, so a symmetric stroke must go nowhere.
+
+    This is the whole propulsive mechanism: fast power stroke with the legs
+    spread, slow recovery with them folded.
+    """
+    import body.sim as bs
+    from env.loader import load_preset
+
+    def travel(fold, power_fraction):
+        old_fold, old_pf = bs.SWIM_FOLD_RAD, bs.SWIM_POWER_FRACTION
+        bs.SWIM_FOLD_RAD, bs.SWIM_POWER_FRACTION = fold, power_fraction
+        try:
+            preset = load_preset("submerged_water")
+            preset.physics["gravity"] = [0.0, 0.0, 0.0]  # isolate thrust
+            body = FlyBody(preset)
+            body.sim.mj_data.qpos[2] += 25.0  # suspend clear of the floor
+            body.sim.mj_data.qvel[:] = 0
+            cpg = TripodCPG(dt_s=body.timestep, seed=0, synchronous=True)
+            start = None
+            for i in range(12000):
+                phase, amplitude = cpg.step(1.0, 0.0, np.ones(6))
+                obs = body.step(phase, amplitude)
+                if i == 2000:
+                    start = obs["position"].copy()
+            end = body._prev_pos.copy()
+            body.close()
+            return float(np.linalg.norm((end - start)[:2]))
+        finally:
+            bs.SWIM_FOLD_RAD, bs.SWIM_POWER_FRACTION = old_fold, old_pf
+
+    asymmetric = travel(fold=1.8, power_fraction=0.35)
+    symmetric = travel(fold=0.0, power_fraction=0.5)
+    assert asymmetric > 5 * max(symmetric, 1e-4), (
+        f"asymmetric stroke {asymmetric:.3f} mm vs symmetric {symmetric:.3f} mm - "
+        "thrust should come from the asymmetry"
+    )
+
+
+def test_cold_is_sluggish_in_muscle_as_well_as_nerve():
+    """Temperature must reach the muscle, not only the membrane.
+
+    An ectotherm in the cold has slower, weaker muscle too. With only the
+    neural Q10 wired up, cold merely stepped less often; it did not look
+    sluggish. The position actuators stand in for muscle, so their gain scales
+    with temperature - inverted, since warm muscle is faster while a warm
+    membrane time constant is shorter.
+    """
+    from env.loader import load_preset
+
+    gains, taus = {}, {}
+    for name in ("cold", "dry_land", "hot"):
+        preset = load_preset(name)
+        body = FlyBody(preset)
+        gains[name] = body.muscle_gain
+        taus[name] = preset.scaled_taus({"tau_m_ms": 20.0})["tau_m_ms"]
+        body.close()
+
+    assert gains["cold"] < gains["dry_land"] < gains["hot"], gains
+    assert taus["hot"] < taus["dry_land"] < taus["cold"], taus
+    # 25 C is the reference, so the baseline must be left exactly alone.
+    assert gains["dry_land"] == pytest.approx(20.0)
+    lo, hi = bs_clamp()
+    assert all(lo <= g <= hi for g in gains.values())
+
+
+def bs_clamp():
+    import body.sim as bs
+
+    return bs.MUSCLE_GAIN_CLAMP
+
+
+def test_humid_reduces_grip_and_costs_travel():
+    """Humidity acts on GRIP, and the cost is a closed-loop effect.
+
+    The humid preset used to differ from dry air only by a 0.6% density change
+    and two small sensory gains, so it behaved identically. It now models the
+    mechanical effect that matters: a damp substrate reduces tarsal adhesion.
+
+    Note the effect needs the brain in the loop. Driving the same body from a
+    fixed CPG, lower adhesion actually makes the fly slightly FASTER
+    (11.7 against 11.2 mm/s over 40k steps). The slowdown comes from reduced
+    grip changing the load the legs report, which changes the descending drive.
+    So this test runs a full Session rather than an open-loop gait - measured
+    across seeds 0-2 the two are cleanly separated, 10.64 +- 0.08 mm/s dry
+    against 5.84 +- 0.20 humid.
+    """
+    from env.loader import load_preset
+    from session import Session
+
+    dry = load_preset("dry_land")
+    humid = load_preset("humid_air")
+
+    # Grip is lower, but the air is NOT denser - humid air is in fact slightly
+    # lighter, and the preset does not pretend otherwise.
+    assert (humid.adhesion_gain or 200.0) < (dry.adhesion_gain or 200.0)
+    assert float(humid.physics["density"]) < float(dry.physics["density"])
+
+    def run(name):
+        sess = Session(preset=name, connectome="synthetic", subset="motor",
+                       synthetic_size=3000, connectome_dir="/tmp/flysim-test", seed=0)
+        summary = sess.run(12000)
+        sess.body.close()
+        return summary
+
+    dry_run, humid_run = run("dry_land"), run("humid_air")
+    assert humid_run["net_speed_mm_s"] < dry_run["net_speed_mm_s"], "damp ground should cost travel"
+    # Slipping specifically: more of the leg motion fails to become travel.
+    assert humid_run["slip_ratio"] > dry_run["slip_ratio"], (
+        f"slip {humid_run['slip_ratio']:.2f} humid vs {dry_run['slip_ratio']:.2f} dry"
+    )
+
+
+def test_grip_peaks_at_intermediate_humidity():
+    """Attachment is NOT monotonic in humidity.
+
+    Insect tarsal pads need some moisture to form the capillary bridges that
+    create grip, so bone-dry air weakens them; a condensed film at high humidity
+    makes them slip, so saturated air weakens them too. Best grip is in the
+    middle. This is the shape the three air presets encode, and it is the reason
+    dry_land is not the fastest preset.
+    """
+    from env.loader import load_preset
+
+    dry = load_preset("dry_land").adhesion_gain
+    mid = load_preset("temperate").adhesion_gain
+    wet = load_preset("humid_air").adhesion_gain
+
+    assert dry < mid > wet, f"grip should peak in the middle: {dry} / {mid} / {wet}"
+    # Dry air should still be the better of the two extremes here - a dried pad
+    # grips worse than an optimal one but better than one on a wet film.
+    assert wet < dry
+
+    # And the air itself must NOT be doing the work: humid air is slightly
+    # lighter than dry, so no preset may claim extra drag for humidity.
+    densities = [float(load_preset(n).physics["density"])
+                 for n in ("dry_land", "temperate", "humid_air")]
+    assert densities[0] > densities[1] > densities[2], densities
+    assert max(densities) / min(densities) < 1.02, "humidity must not fake a drag effect"

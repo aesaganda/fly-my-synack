@@ -9,7 +9,24 @@ physics:
   density: 9.98e-4       # water @20C
   viscosity: 1.002e-3    # water @20C
   wind: [0.0, 0.0, 0.0]
-  gravity: [0.0, 0.0, -9810.0]
+  # BUOYANCY APPROXIMATION. MuJoCo's fluid model gives drag and lift but NOT
+  # buoyancy - verified: a sphere with exactly the medium's density still
+  # sinks. So the buoyant force is folded into an effective gravity instead.
+  # An insect is slightly denser than water, so the net downward acceleration
+  # is roughly (rho_body - rho_water)/rho_body * g; at ~1.1 g/cm^3 that is
+  # about 9% of g, hence ~-880. Rounded to -300 so the fly hangs in the water
+  # instead of settling onto the floor, which is what makes it read as
+  # swimming rather than trudging.
+  gravity: [0.0, 0.0, -300.0]
+  # Rowing stroke, no adhesion - see body/sim.py. With adhesion on and a walking
+  # gait the fly simply hauls itself along the bottom.
+  locomotion: swim
+  # Slower limb cycle than walking's 18 Hz. Swept in-situ: 8 Hz gives the best
+  # true swimming (1.21 mm/s with only 0.2 feet touching and the body floating
+  # highest), while 18 Hz just thrashes for half the speed and 2 Hz is really
+  # the fly pushing off the bottom again. A viscous medium does not reward
+  # thrashing.
+  stroke_freq_hz: 8.0
   # MuJoCo docs: the Euler integrator handles BODY viscosity poorly. At this
   # viscosity Euler goes unstable, so switch integrators for this preset.
   integrator: implicitfast

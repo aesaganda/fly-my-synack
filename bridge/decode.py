@@ -28,19 +28,52 @@ from brain.tables import DESCENDING, MOTOR
 # vnc_motor has fl=135, ml=116, hl=130 (plus non-leg ad/wm/nm/hm/xm).
 _SUBCLASS_TO_POS = {"fl": "F", "ml": "M", "hl": "H"}
 
-# Population rates are compared against a reference firing rate so the decoded
-# drive is interpretable: a population firing at REFERENCE_RATE_HZ produces
-# tanh(1) = 0.76 of full drive. PLACEHOLDER tuning knobs, not measurements.
-REFERENCE_RATE_HZ = 60.0
+# Leg motor-pool rate that corresponds to full walking drive.
+#
+# This mapping used to be tanh(rate / 10), which SATURATED and silently threw
+# away the temperature signal. Q10 scaling gives leg pools that fire at 35 Hz
+# at 15 C, 70 Hz at 25 C and 123 Hz at 35 C - a 3.5x spread - but tanh of
+# 3.5 / 7.0 / 12.3 is 0.998 / 1.000 / 1.000, so hot, cold and temperate walked
+# at exactly the same speed. Q10 was working; nothing downstream could see it.
+#
+# Linear with a clip instead, referenced to the 25 C rate, so the whole
+# physiological range lands in the responsive part of the curve. The clip still
+# protects against a runaway network, which is what the tanh was there for.
+REFERENCE_RATE_HZ = 88.0
+# Ceiling on the descending drive. 1.2 is not an arbitrary safety margin - it is
+# where the BODY tops out. Above it the commanded stride passes ~22 Hz, the
+# position actuators can no longer track their targets, and the gait degrades:
+# at 1.5 the hot preset actually gets SLOWER (5.7 mm/s against 11.6) and its
+# straightness collapses to 0.40. Hot is limited by the legs, not the brain.
+MAX_FORWARD_DRIVE = 1.2
 TURN_REFERENCE_HZ = 25.0
 
-# How far per-leg drive may deviate from the mean. This is a STABILITY limit,
-# not a modelling choice: at +/-0.8 the stride asymmetry between individual legs
-# rolls the fly onto its back within a few thousand steps (verified - with
-# per_leg_gain pinned to 1.0 the same run stays upright indefinitely). Keeping
-# the depth small preserves the connectome's per-leg influence without
-# capsizing the animal.
-PER_LEG_DEPTH = 0.25
+# How far per-leg drive may deviate from the mean.
+#
+# Originally a STABILITY limit: at +/-0.8 the stride asymmetry between legs
+# rolled the fly onto its back within a few thousand steps.
+#
+# It is also what makes the path curve. The per-leg rates carry a systematic
+# left-right bias (the connectome's two sides differ, and the weight
+# normalisation does not equalise them), which turns into a steady yaw drift.
+# Dry land hides this because the fly covers ground fast enough that the drift
+# barely bends the path; submerged, forward speed halves while the drift does
+# not, so the same bias curves the path twice as hard - measured straightness
+# 0.985 on land against 0.655 in water at depth 0.25.
+#
+# Swept against straightness AND speed in both presets:
+#     depth   dry straight / mm/s     water straight / mm/s
+#     0.25       0.985 / 10.03           0.655 / 5.30
+#     0.10       0.997 / 10.97           0.889 / 7.33
+#     0.05       0.997 / 11.13           0.964 / 7.79   <- chosen
+#     0.00       0.997 / 11.26           0.947 / 7.63
+# 0.05 beats 0.00 on water straightness while keeping the connectome's per-leg
+# contribution non-zero, so the term still does something rather than being
+# switched off.
+#
+# Note: explicitly balancing left against right was tried and made water WORSE
+# (0.553). The bias is not a clean left/right offset that can be subtracted.
+PER_LEG_DEPTH = 0.05
 
 
 @dataclass
@@ -107,10 +140,13 @@ class MotorDecoder:
         right = self._mean_rate(self.dn_right)
 
         # tanh keeps a runaway network from producing an absurd drive.
-        forward = float(np.tanh(leg_rates.mean() / REFERENCE_RATE_HZ)) if leg_rates.size else 0.0
+        forward = (
+            float(np.clip(leg_rates.mean() / REFERENCE_RATE_HZ, 0.0, MAX_FORWARD_DRIVE))
+            if leg_rates.size else 0.0
+        )
         turn = float(np.tanh((right - left) / TURN_REFERENCE_HZ))
 
-        forward = float(np.clip(forward + self.override.get("forward", 0.0), 0.0, 1.5))
+        forward = float(np.clip(forward + self.override.get("forward", 0.0), 0.0, MAX_FORWARD_DRIVE))
         turn = float(np.clip(turn + self.override.get("turn", 0.0), -1.0, 1.0))
 
         per_leg = (
